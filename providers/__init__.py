@@ -47,7 +47,7 @@ class OpenAIClient:
 class OpenAIVisionProvider(VisionProvider):
     """OpenAI GPT-4 Vision implementation."""
 
-    DEFAULT_MODEL = "gpt-5-mini"
+    DEFAULT_MODEL = "gpt-5.2"
 
     def __init__(self, model: Optional[str] = None):
         self.model = model or self.DEFAULT_MODEL
@@ -157,7 +157,7 @@ class GeminiVisionProvider(VisionProvider):
 class OpenAILLMProvider(LLMProvider):
     """OpenAI text completion provider."""
 
-    DEFAULT_MODEL = "gpt-5-mini"
+    DEFAULT_MODEL = "gpt-5.2"
 
     def __init__(self, model: Optional[str] = None):
         self.model = model or self.DEFAULT_MODEL

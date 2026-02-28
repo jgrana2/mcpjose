@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "mcpjose": {
+      "type": "local",
+      "command": ["../env/bin/python", "../mcp_server/server.py"],
+      "enabled": true
+    }
+  }
+}
