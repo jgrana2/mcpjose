@@ -94,6 +94,11 @@ def _init_ai_tools(mcp: FastMCP) -> None:
         print(f"Warning: Could not initialize OpenAI LLM: {e}")
 
     try:
+        transcription = ProviderFactory.create_transcription("openai")
+    except Exception as e:
+        print(f"Warning: Could not initialize OpenAI transcription: {e}")
+
+    try:
         image_gen = ProviderFactory.create_image_generator("gemini")
     except Exception as e:
         print(f"Warning: Could not initialize Gemini image generator: {e}")
@@ -117,6 +122,67 @@ def _init_ai_tools(mcp: FastMCP) -> None:
             """
             result = openai_llm.complete(prompt)
             return {"text": result}
+
+    if transcription:
+
+        @mcp.tool()
+        def transcribe_audio(
+            audio_path: str,
+            model: str = "gpt-4o-transcribe",
+            language: Optional[str] = None,
+            response_format: str = "text",
+            timestamp_granularities: Optional[List[str]] = None,
+            prompt: Optional[str] = None,
+        ) -> Dict[str, Any]:
+            """Transcribe audio file to text using OpenAI Whisper.
+
+            Args:
+                audio_path: Path to audio file (mp3, mp4, mpeg, mpga, m4a, wav, webm).
+                model: Model to use (gpt-4o-transcribe, gpt-4o-mini-transcribe, whisper-1).
+                language: ISO language code for the audio (e.g., 'en', 'es').
+                response_format: Output format (text, json, verbose_json, srt, vtt).
+                timestamp_granularities: List of timestamp granularities (['word'], ['segment']).
+                prompt: Optional context hint to improve transcription accuracy.
+
+            Returns:
+                Dictionary with transcription result. Format varies by response_format:
+                - text: {"text": "transcription"}
+                - json/verbose_json: {"text": "...", "duration": ..., "language": "..."}
+                - With timestamps: includes "words" or "segments" arrays
+            """
+            try:
+                # Build kwargs for API call
+                kwargs = {"model": model, "response_format": response_format}
+                if language:
+                    kwargs["language"] = language
+                if timestamp_granularities:
+                    kwargs["timestamp_granularities"] = timestamp_granularities
+                if prompt:
+                    kwargs["prompt"] = prompt
+
+                # Call transcription provider
+                result = transcription.transcribe(audio_path, **kwargs)
+
+                # Handle different response formats
+                if response_format == "text":
+                    # Plain text response
+                    return {"text": result if isinstance(result, str) else result.text}
+                else:
+                    # Structured response (json, verbose_json, etc.)
+                    # Convert to dict if needed
+                    if hasattr(result, "model_dump"):
+                        return result.model_dump()
+                    elif hasattr(result, "dict"):
+                        return result.dict()
+                    else:
+                        return {"result": str(result)}
+
+            except FileNotFoundError as e:
+                return {"error": str(e)}
+            except ValueError as e:
+                return {"error": str(e)}
+            except Exception as e:
+                return {"error": f"Transcription failed: {str(e)}"}
 
     if openai_vision:
 

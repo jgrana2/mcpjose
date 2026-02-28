@@ -116,6 +116,56 @@ def generate_image_main():
         print(f"Image saved to: {result['image_path']}")
 
 
+def transcribe_audio_main():
+    """CLI entry point for audio transcription."""
+    parser = argparse.ArgumentParser(description="Transcribe audio with OpenAI Whisper")
+    parser.add_argument("audio_path", help="Path to audio file")
+    parser.add_argument("--model", default="gpt-4o-transcribe", help="Model to use")
+    parser.add_argument("--language", default=None, help="Language code (e.g., en, es)")
+    parser.add_argument("--format", default="text", help="Response format (text, json, verbose_json, srt, vtt)")
+    parser.add_argument("--timestamps", action="store_true", help="Include word-level timestamps")
+    parser.add_argument("--prompt", default=None, help="Context hint for better accuracy")
+    parser.add_argument("--output", default=None, help="Output file path")
+
+    args = parser.parse_args()
+
+    provider = ProviderFactory.create_transcription("openai")
+    
+    kwargs = {"model": args.model, "response_format": args.format}
+    if args.language:
+        kwargs["language"] = args.language
+    if args.timestamps:
+        kwargs["timestamp_granularities"] = ["word"]
+    if args.prompt:
+        kwargs["prompt"] = args.prompt
+
+    try:
+        result = provider.transcribe(args.audio_path, **kwargs)
+        
+        # Format output based on response type
+        if args.format == "text":
+            output = result if isinstance(result, str) else result.text
+        else:
+            import json
+            if hasattr(result, "model_dump"):
+                output = json.dumps(result.model_dump(), indent=2)
+            elif hasattr(result, "dict"):
+                output = json.dumps(result.dict(), indent=2)
+            else:
+                output = str(result)
+        
+        if args.output:
+            with open(args.output, "w") as f:
+                f.write(output)
+            print(f"Saved to {args.output}")
+        else:
+            print(output)
+    
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     # Default to call_llm if run directly
     call_llm_main()

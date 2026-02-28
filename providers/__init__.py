@@ -181,6 +181,65 @@ class OpenAILLMProvider(LLMProvider):
         return response.choices[0].message.content or ""
 
 
+class OpenAITranscriptionProvider:
+    """OpenAI Whisper audio transcription provider."""
+
+    DEFAULT_MODEL = "gpt-4o-transcribe"
+
+    def __init__(self, model: Optional[str] = None):
+        self.model = model or self.DEFAULT_MODEL
+        self._client = None
+
+    @property
+    def name(self) -> str:
+        return "openai"
+
+    @property
+    def client(self) -> OpenAI:
+        if self._client is None:
+            self._client = OpenAIClient.get()
+        return self._client
+
+    def transcribe(self, audio_path: Union[str, Path], **kwargs) -> Any:
+        """Transcribe audio file to text.
+        
+        Args:
+            audio_path: Path to audio file (mp3, mp4, mpeg, mpga, m4a, wav, webm)
+            **kwargs: Additional parameters passed to OpenAI API:
+                - model: Model to use (default: gpt-4o-transcribe)
+                - language: ISO language code (e.g., 'en', 'es')
+                - response_format: Output format (text, json, verbose_json, srt, vtt)
+                - timestamp_granularities: List of granularities (['word'] or ['segment'])
+                - prompt: Context hint for better accuracy
+        
+        Returns:
+            Transcription result (format depends on response_format parameter)
+        """
+        audio_path = Path(audio_path)
+        
+        # Validate file exists
+        if not audio_path.exists():
+            raise FileNotFoundError(f"Audio file not found: {audio_path}")
+        
+        # Check file size (OpenAI limit is 25MB)
+        file_size_mb = audio_path.stat().st_size / (1024 * 1024)
+        if file_size_mb > 25:
+            raise ValueError(
+                f"Audio file size ({file_size_mb:.1f}MB) exceeds 25MB limit. "
+                "Please split the file into smaller chunks."
+            )
+        
+        # Open and transcribe
+        with open(audio_path, "rb") as audio_file:
+            response = self.client.audio.transcriptions.create(
+                model=kwargs.get("model", self.model),
+                file=audio_file,
+                **{k: v for k, v in kwargs.items() if k != "model"}
+            )
+        
+        return response
+
+
 class GeminiImageGenerator(ImageGenerator):
     """Google Gemini image generation provider."""
 
@@ -359,6 +418,10 @@ class ProviderFactory:
         "google": GoogleOCRProvider,
     }
 
+    _transcription_providers = {
+        "openai": OpenAITranscriptionProvider,
+    }
+
     @classmethod
     def create_vision(cls, provider: str = "openai", **kwargs) -> VisionProvider:
         if provider not in cls._vision_providers:
@@ -384,3 +447,9 @@ class ProviderFactory:
         if provider not in cls._ocr_providers:
             raise ValueError(f"Unknown OCR provider: {provider}")
         return cls._ocr_providers[provider](**kwargs)
+
+    @classmethod
+    def create_transcription(cls, provider: str = "openai", **kwargs) -> OpenAITranscriptionProvider:
+        if provider not in cls._transcription_providers:
+            raise ValueError(f"Unknown transcription provider: {provider}")
+        return cls._transcription_providers[provider](**kwargs)
