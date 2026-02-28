@@ -239,15 +239,41 @@ def _init_ai_tools(mcp: FastMCP) -> None:
     ) -> Dict[str, Any]:
         """Search for tweets about a topic and return their content.
 
-        Searches X (Twitter) for recent tweets about the given topic,
-        filtering for tweets that contain links. Returns up to 20 tweets.
+        IMPORTANT: X (Twitter) uses DETERMINISTIC keyword matching, not heuristic search.
+        For best results, use SHORT, SPECIFIC keywords (max 3 words recommended).
+        The tool automatically extracts up to 3 key words from longer queries.
+        
+        Examples of good queries:
+        - "AI agents" (2 words)
+        - "climate change technology" (3 words)
+        - "Python FastAPI" (2 words)
+        
+        Avoid: Long sentences, common words, or overly generic terms.
 
         Args:
-            topic: The search topic/query
+            topic: The search topic/query (will be optimized to max 3 keywords)
 
         Returns:
-            Dictionary with 'text' (concatenated tweets), 'count' (int), and 'topic'
+            Dictionary with 'text' (concatenated tweets), 'count' (int), 'topic', and 'search_query'
         """
+        
+        # Common stop words to filter out for better keyword extraction
+        stop_words = {
+            'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
+            'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the',
+            'to', 'was', 'will', 'with', 'about', 'how', 'what', 'when', 'where',
+            'who', 'why', 'which', 'de', 'para', 'con', 'sin', 'la', 'el', 'los', 'las', 'un', 'una', 'unos', 'unas'
+        }
+        
+        # Extract keywords: remove stop words and keep max 3 meaningful words
+        words = topic.lower().split()
+        keywords = [w for w in words if w not in stop_words and len(w) > 2][:3]
+        
+        # If no keywords remain after filtering, use first 3 words of original
+        if not keywords:
+            keywords = words[:3]
+        
+        search_query = " ".join(keywords)
 
         api = API()
         # Add account from environment variables
@@ -269,7 +295,7 @@ def _init_ai_tools(mcp: FastMCP) -> None:
         # Search for tweets with improved error handling
         tweets = []
         try:
-            async for tweet in api.search(f"{topic}", limit=20):
+            async for tweet in api.search(search_query, limit=20):
                 tweets.append(tweet.rawContent)
         except Exception as e:
             # Throw exception with a clear message if the search fails
@@ -280,6 +306,7 @@ def _init_ai_tools(mcp: FastMCP) -> None:
             "text": "\n\n---TWEET---\n\n".join(tweets),
             "count": len(tweets),
             "topic": topic,
+            "search_query": search_query,
         }
 
 
