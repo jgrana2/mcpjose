@@ -1,0 +1,121 @@
+"""Simplified CLI entry points for direct tool execution."""
+
+import argparse
+import sys
+from pathlib import Path
+
+# Add parent to path for imports
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from core.config import CredentialManager
+from core.utils import load_text_file
+from providers import ProviderFactory
+
+
+def call_llm_main():
+    """CLI entry point for OpenAI LLM."""
+    parser = argparse.ArgumentParser(description="Call OpenAI API with a prompt")
+    parser.add_argument("prompt", help="The prompt to send")
+    args = parser.parse_args()
+
+    provider = ProviderFactory.create_llm("openai")
+    print(provider.complete(args.prompt))
+
+
+def openai_vision_main():
+    """CLI entry point for OpenAI Vision."""
+    parser = argparse.ArgumentParser(description="Process images with OpenAI Vision")
+    parser.add_argument("image_path", help="Path to image or PDF")
+    parser.add_argument("prompt", help="Text prompt")
+    parser.add_argument("--ocr-context", default=None, help="OCR context text")
+    parser.add_argument("--ocr-file", default=None, help="Path to OCR context file")
+    parser.add_argument("--output", default=None, help="Output file path")
+    parser.add_argument("--model", default=None, help="Model name")
+
+    args = parser.parse_args()
+
+    ocr_context = args.ocr_context
+    if args.ocr_file:
+        ocr_context = load_text_file(args.ocr_file)
+
+    provider = ProviderFactory.create_vision("openai")
+    result = provider.process_image(
+        args.image_path,
+        args.prompt,
+        ocr_context,
+        model=args.model,
+    )
+
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(result)
+        print(f"Saved to {args.output}")
+    else:
+        print(result)
+
+
+def gemini_vision_main():
+    """CLI entry point for Gemini Vision."""
+    parser = argparse.ArgumentParser(description="Process images with Gemini Vision")
+    parser.add_argument("image_path", help="Path to image or PDF")
+    parser.add_argument("prompt", help="Text prompt")
+    parser.add_argument("--ocr-context", default=None, help="OCR context text")
+    parser.add_argument("--ocr-file", default=None, help="Path to OCR context file")
+    parser.add_argument("--output", default=None, help="Output file path")
+
+    args = parser.parse_args()
+
+    ocr_context = args.ocr_context
+    if args.ocr_file:
+        ocr_context = load_text_file(args.ocr_file)
+
+    provider = ProviderFactory.create_vision("gemini")
+    result = provider.process_image(args.image_path, args.prompt, ocr_context)
+
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(result)
+        print(f"Saved to {args.output}")
+    else:
+        print(result)
+
+
+def google_ocr_main():
+    """CLI entry point for Google OCR."""
+    parser = argparse.ArgumentParser(description="Extract text with Google OCR")
+    parser.add_argument("input_file", help="Path to image or PDF")
+    parser.add_argument("--type", choices=["pdf", "image"], help="File type")
+    parser.add_argument("--output", "-o", help="Output file path")
+
+    args = parser.parse_args()
+
+    provider = ProviderFactory.create_ocr("google")
+    annotations = provider.extract_text(args.input_file, args.type)
+
+    print(f"Extracted {len(annotations)} text elements")
+
+    if args.output:
+        provider.save_annotations(annotations, args.output)
+        print(f"Saved to {args.output}")
+
+
+def generate_image_main():
+    """CLI entry point for image generation."""
+    parser = argparse.ArgumentParser(description="Generate image with Gemini")
+    parser.add_argument("prompt", help="Image description")
+    parser.add_argument("--output", default=None, help="Output path")
+
+    args = parser.parse_args()
+
+    provider = ProviderFactory.create_image_generator("gemini")
+    result = provider.generate(args.prompt, args.output)
+
+    if "text" in result:
+        print(result["text"])
+    if "image_path" in result:
+        print(f"Image saved to: {result['image_path']}")
+
+
+if __name__ == "__main__":
+    # Default to call_llm if run directly
+    call_llm_main()

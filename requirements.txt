@@ -1,0 +1,11 @@
+mcp
+openai
+python-dotenv
+vertexai
+google-cloud-vision
+google-genai
+pdf2image
+Pillow
+ddgs
+pypdf
+requests
