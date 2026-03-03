@@ -59,3 +59,4 @@ credentials.json
 auth/google/vision-key.json
 accounts.db
 .agents/skills/
+.gemini/settings.json
