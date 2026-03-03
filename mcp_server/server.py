@@ -24,6 +24,7 @@ from mcp.server.fastmcp import FastMCP
 from providers import ProviderFactory
 from providers.search import SearchFactory
 from tools.navigation import init_tools as init_navigation_tools
+from tools.whatsapp import init_tools as init_whatsapp_tools
 
 
 def create_server() -> FastMCP:
@@ -36,6 +37,9 @@ def create_server() -> FastMCP:
 
     # Initialize navigation tools
     init_navigation_tools(mcp)
+
+    # Initialize WhatsApp tools
+    init_whatsapp_tools(mcp)
 
     # Initialize search tools
     _init_search_tools(mcp)
@@ -369,7 +373,7 @@ def _init_ai_tools(mcp: FastMCP) -> None:
 
         # Return tweets as structured data with clear separators
         return {
-            "text": "\n\n---TWEET---\n\n".join(tweets),
+            "text": "\n\n---POST---\n\n".join(tweets),
             "count": len(tweets),
             "topic": topic,
             "search_query": search_query,

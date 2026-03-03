@@ -102,7 +102,7 @@ class OpenAIVisionProvider(VisionProvider):
 class GeminiVisionProvider(VisionProvider):
     """Google Gemini multimodal implementation."""
 
-    DEFAULT_MODEL = "gemini-3-flash-preview"
+    DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
 
     def __init__(self, model: Optional[str] = None):
         self.model = model or self.DEFAULT_MODEL
@@ -115,7 +115,7 @@ class GeminiVisionProvider(VisionProvider):
             creds["credentials_path"]
         )
         vertexai.init(
-            project=creds["project_id"], location="us-central1", credentials=credentials
+            project=creds["project_id"], location="global", credentials=credentials
         )
 
     @property

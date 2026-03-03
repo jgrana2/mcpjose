@@ -58,7 +58,7 @@ async def x_search(
         count = 0
         async for tweet in search_task:
             count += 1
-            print(f"Tweet #{count} retrieved (ID: {tweet.id})")
+            print(f"Post #{count} retrieved (ID: {tweet.id})")
             tweets.append(tweet.rawContent)
             
         print(f"\nTotal tweets retrieved: {count}")
@@ -119,7 +119,7 @@ async def main():
         print(f"Total characters: {len(result['text'])}")
         print()
         print("=" * 70)
-        print("RAW SEARCH RESULTS (Tweet Contents):")
+        print("RAW SEARCH RESULTS (Post Contents):")
         print("=" * 70)
         print()
         
@@ -127,7 +127,7 @@ async def main():
         if tweets:
             for i, tweet in enumerate(tweets, 1):
                 print(f"{'='*70}")
-                print(f"TWEET #{i}")
+                print(f"POST #{i}")
                 print(f"{'='*70}")
                 print(tweet.strip())
                 print()
