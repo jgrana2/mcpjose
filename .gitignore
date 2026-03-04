@@ -56,7 +56,7 @@ htmlcov/
 .env
 .env.local
 credentials.json
-auth/google/vision-key.json
+auth/
 accounts.db
 .agents/skills/
 .gemini/settings.json
