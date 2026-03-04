@@ -776,9 +776,7 @@ Final Answer: [Your complete, helpful response to the user's original question]
                 result = self._execute_tool(action_or_final, action_input)
 
                 # Record observation
-                observation = json.dumps(result, indent=2)[
-                    :1000
-                ]  # Truncate for readability
+                observation = json.dumps(result, indent=2)
                 obs_step = Step(
                     step_type="observation",
                     content=observation,
@@ -789,7 +787,9 @@ Final Answer: [Your complete, helpful response to the user's original question]
                 self.steps.append(obs_step)
 
                 if self.verbose:
-                    print(f"Observation: {observation[:500]}...")
+                    # Show first 1000 chars in console but full observation goes to LLM
+                    display_obs = observation if len(observation) <= 1000 else observation[:1000] + "\n... (truncated for display)"
+                    print(f"Observation: {display_obs}")
 
                 # Update conversation
                 conversation += f"Thought: {thought}\n"
