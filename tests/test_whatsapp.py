@@ -233,7 +233,7 @@ class TestWhatsAppToolIntegration:
         init_tools(mcp_server)
         tools = await mcp_server.list_tools()
         _ = next(t for t in tools if t.name == "send_ws_msg")
-        
+
         # Get the tool function directly from the internal manager
         tool_obj = mcp_server._tool_manager._tools["send_ws_msg"]
         result = tool_obj.fn(destination=None, message="Test message")
@@ -270,7 +270,9 @@ class TestWhatsAppToolIntegration:
 
     @patch("tools.whatsapp.DailyRateLimiter.from_env")
     @pytest.mark.asyncio
-    async def test_send_ws_msg_missing_destination(self, mock_limiter_factory, mcp_server, monkeypatch):
+    async def test_send_ws_msg_missing_destination(
+        self, mock_limiter_factory, mcp_server, monkeypatch
+    ):
         """Test error when destination is not configured."""
         # Mock rate limiter first
         mock_limiter = Mock()
@@ -282,7 +284,7 @@ class TestWhatsAppToolIntegration:
         mock_rate_result.remaining = 10
         mock_limiter.consume.return_value = mock_rate_result
         mock_limiter_factory.return_value = mock_limiter
-        
+
         monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "test_token")
         monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "123456")
         # Explicitly unset the destination
@@ -293,7 +295,7 @@ class TestWhatsAppToolIntegration:
         result = tool_obj.fn(destination=None, message="Test message")
 
         assert result["ok"] is False
-        assert "Missing predefined destination" in result["error"]
+        assert "Missing destination" in result["error"]
 
     @pytest.mark.asyncio
     async def test_send_ws_msg_empty_message(self, mcp_server, mock_env):
@@ -306,14 +308,126 @@ class TestWhatsAppToolIntegration:
         assert "non-empty string" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_send_ws_msg_destination_mismatch(self, mcp_server, mock_env):
-        """Test error when destination doesn't match default."""
+    async def test_send_ws_msg_different_destination(
+        self, mcp_server, mock_env, monkeypatch
+    ):
+        """Test sending to a destination different from default."""
+        # Mock rate limiter
+        mock_limiter_factory = Mock()
+        mock_limiter = Mock()
+        mock_rate_result = Mock()
+        mock_rate_result.allowed = True
+        mock_rate_result.day = "2024-01-01"
+        mock_rate_result.used = 1
+        mock_rate_result.limit = 10
+        mock_rate_result.remaining = 9
+        mock_limiter.consume.return_value = mock_rate_result
+        mock_limiter_factory.return_value = mock_limiter
+
+        # Mock HTTP client and response
+        mock_http = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {"messages": [{"id": "test_message_id"}]}
+        mock_http.post.return_value = mock_response
+
+        monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "test_token")
+        monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "123456")
+        monkeypatch.setenv("WHATSAPP_DEFAULT_DESTINATION", "+14155551234")
+
+        # Mock the HTTPClient import in whatsapp module
+        with patch("tools.whatsapp.HTTPClient", return_value=mock_http):
+            with patch(
+                "tools.whatsapp.DailyRateLimiter.from_env", return_value=mock_limiter
+            ):
+                init_tools(mcp_server, http_client=mock_http)
+                tool_obj = mcp_server._tool_manager._tools["send_ws_msg"]
+
+                # Test sending to a different destination
+                result = tool_obj.fn(
+                    destination="+19998887777",
+                    message="Test message to different number",
+                )
+
+                # Should succeed with new destination
+                assert result["ok"] is True
+                assert result["destination"] == "19998887777"  # Normalized without +
+                assert result["message_id"] == "test_message_id"
+
+    @pytest.mark.asyncio
+    async def test_send_ws_msg_no_destination_fallback(
+        self, mcp_server, mock_env, monkeypatch
+    ):
+        """Test fallback to default destination when no destination provided."""
+        # Mock rate limiter
+        mock_limiter_factory = Mock()
+        mock_limiter = Mock()
+        mock_rate_result = Mock()
+        mock_rate_result.allowed = True
+        mock_rate_result.day = "2024-01-01"
+        mock_rate_result.used = 1
+        mock_rate_result.limit = 10
+        mock_rate_result.remaining = 9
+        mock_limiter.consume.return_value = mock_rate_result
+        mock_limiter_factory.return_value = mock_limiter
+
+        # Mock HTTP client and response
+        mock_http = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {"messages": [{"id": "test_message_id"}]}
+        mock_http.post.return_value = mock_response
+
+        monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "test_token")
+        monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "123456")
+        monkeypatch.setenv("WHATSAPP_DEFAULT_DESTINATION", "+14155551234")
+
+        # Mock the HTTPClient import in whatsapp module
+        with patch("tools.whatsapp.HTTPClient", return_value=mock_http):
+            with patch(
+                "tools.whatsapp.DailyRateLimiter.from_env", return_value=mock_limiter
+            ):
+                init_tools(mcp_server, http_client=mock_http)
+                tool_obj = mcp_server._tool_manager._tools["send_ws_msg"]
+
+                # Test sending without destination (should use default)
+                result = tool_obj.fn(
+                    destination=None, message="Test message to default number"
+                )
+
+                # Should succeed with default destination
+                assert result["ok"] is True
+                assert (
+                    result["destination"] == "14155551234"
+                )  # Normalized default destination
+                assert result["message_id"] == "test_message_id"
+
+    @pytest.mark.asyncio
+    async def test_send_ws_msg_no_destination_no_default(
+        self, mcp_server, mock_env, monkeypatch
+    ):
+        """Test error when no destination provided and no default set."""
+        # Mock rate limiter
+        mock_limiter_factory = Mock()
+        mock_limiter = Mock()
+        mock_rate_result = Mock()
+        mock_rate_result.allowed = True
+        mock_rate_result.day = "2024-01-01"
+        mock_rate_result.used = 0
+        mock_rate_result.limit = 10
+        mock_rate_result.remaining = 10
+        mock_limiter.consume.return_value = mock_rate_result
+        mock_limiter_factory.return_value = mock_limiter
+
+        monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "test_token")
+        monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "123456")
+        # Explicitly unset the destination
+        monkeypatch.delenv("WHATSAPP_DEFAULT_DESTINATION", raising=False)
+
         init_tools(mcp_server)
         tool_obj = mcp_server._tool_manager._tools["send_ws_msg"]
-        result = tool_obj.fn(destination="+19998887777", message="Test")
+        result = tool_obj.fn(destination=None, message="Test message")
 
         assert result["ok"] is False
-        assert "Destination is fixed" in result["error"]
+        assert "Missing destination" in result["error"]
 
 
 if __name__ == "__main__":

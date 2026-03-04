@@ -160,25 +160,21 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
         Outputs:
             ok: boolean, plus provider info and (if available) message_id.
         """
-        dest = (default_destination or "").strip()
-        if not dest:
-            return WhatsAppSendResult(
-                ok=False,
-                destination="",
-                provider="whatsapp_cloud_api",
-                error="Missing predefined destination (set WHATSAPP_DEFAULT_DESTINATION).",
-            ).to_dict()
-
-        normalized = _normalize_e164ish(dest)
+        # Determine destination to use
         if destination:
-            requested = _normalize_e164ish(destination)
-            if requested and requested != normalized:
+            # Use the destination provided by the user
+            normalized = _normalize_e164ish(destination)
+        else:
+            # Use default destination if none provided
+            dest = (default_destination or "").strip()
+            if not dest:
                 return WhatsAppSendResult(
                     ok=False,
-                    destination=normalized,
+                    destination="",
                     provider="whatsapp_cloud_api",
-                    error="Destination is fixed; omit destination or match WHATSAPP_DEFAULT_DESTINATION.",
+                    error="Missing destination. Provide a destination or set WHATSAPP_DEFAULT_DESTINATION.",
                 ).to_dict()
+            normalized = _normalize_e164ish(dest)
 
         if not message or not message.strip():
             return WhatsAppSendResult(

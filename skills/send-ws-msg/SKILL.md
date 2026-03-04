@@ -25,7 +25,7 @@ Set these env vars (recommended: `auth/.env` or `auth/credentials.json`):
 - `WHATSAPP_API_VERSION` (optional, default `v21.0`)
 
 Destination controls:
-- `WHATSAPP_DEFAULT_DESTINATION` (required; tool always sends here)
+- `WHATSAPP_DEFAULT_DESTINATION` (required as fallback; used when no destination is provided)
 
 Daily cap:
 - `WHATSAPP_DAILY_MAX` (default `10`, counted per local day)
@@ -36,18 +36,20 @@ Daily cap:
 
 Tool: `send_ws_msg`
 - Inputs:
-  - `destination` (string | null): E.164-ish number. If null/empty, uses `WHATSAPP_DEFAULT_DESTINATION`.
+  - `destination` (string | null): E.164-ish number. If provided, sends to this number. If null/empty, uses `WHATSAPP_DEFAULT_DESTINATION` as fallback.
   - `message` (string): message body
 - Output:
   - `{ ok, destination, provider, message_id?, rate_limit?, error? }`
 
-Example:
+Examples:
 ```json
 { "destination": "+14155550123", "message": "Hi! This is a test." }
+```
+```json
+{ "message": "Hi! This goes to default destination." }
 ```
 
 ## Troubleshooting
 
-- `Missing destination`: pass `destination` or set `WHATSAPP_DEFAULT_DESTINATION`.
-- `Destination not in ... allowlist`: update `WHATSAPP_ALLOWED_DESTINATIONS` (or unset it).
+- `Missing destination`: provide a `destination` parameter or set `WHATSAPP_DEFAULT_DESTINATION`.
 - `Daily rate limit exceeded`: increase `WHATSAPP_DAILY_MAX` or wait until the next UTC day.
