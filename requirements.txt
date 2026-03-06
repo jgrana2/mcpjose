@@ -9,3 +9,5 @@ Pillow
 ddgs
 pypdf
 requests
+langchain
+langchain-openai

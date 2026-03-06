@@ -24,6 +24,7 @@
 
 ### Development & Agent Support
 - **Agent Skills**: 15+ specialized skills for coding agents (document creation, design, web development, research)
+- **LangChain Agent**: Dedicated LangChain tool-calling agent wired to project tools, skills, and `AGENTS.md`
 - **CLI Interface**: Command-line tools for direct tool execution
 - **Provider Pattern**: Clean abstraction for different AI service providers
 - **Configuration Management**: Secure credential handling with singleton pattern
@@ -50,6 +51,7 @@
 ├── auth/               # Authentication handling
 ├── tests/              # Test suite
 ├── userapp/            # User application code
+├── langchain_agent/    # LangChain agent integration package
 └── cli.py              # CLI entry points
 ```
 
@@ -130,6 +132,22 @@ python cli.py search "latest AI developments"
 
 # Send WhatsApp messages
 python cli.py send-ws-msg "+1234567890" "Hello from MCP Jose!"
+```
+
+### Using the LangChain Agent
+
+```bash
+# List available tool wrappers
+python -m langchain_agent.main --list-tools
+
+# List discovered project skills (SKILL.md files)
+python -m langchain_agent.main --list-skills
+
+# Run a one-shot prompt
+python -m langchain_agent.main "Use available skills and tools to research MCP updates"
+
+# Run interactively
+python -m langchain_agent.main --interactive
 ```
 
 ## Available Tools
