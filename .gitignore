@@ -60,3 +60,4 @@ auth/
 accounts.db
 .agents/skills/
 .gemini/settings.json
+google-cloud-sdk/
