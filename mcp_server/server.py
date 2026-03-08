@@ -25,6 +25,7 @@ from providers import ProviderFactory
 from providers.search import SearchFactory
 from tools.navigation import init_tools as init_navigation_tools
 from tools.whatsapp import init_tools as init_whatsapp_tools
+from tools.wolfram_alpha import init_tools as init_wolfram_alpha_tools
 
 
 def create_server() -> FastMCP:
@@ -43,6 +44,9 @@ def create_server() -> FastMCP:
 
     # Initialize search tools
     _init_search_tools(mcp)
+
+    # Initialize Wolfram Alpha tools
+    init_wolfram_alpha_tools(mcp)
 
     # Initialize AI tools
     _init_ai_tools(mcp)
