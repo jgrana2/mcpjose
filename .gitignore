@@ -58,5 +58,4 @@ htmlcov/
 credentials.json
 auth/
 accounts.db
-.agents/skills/
 .gemini/settings.json

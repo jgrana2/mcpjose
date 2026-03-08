@@ -1,0 +1,75 @@
+{
+  "skill_name": "wolfram-alpha",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "What is the derivative of x^3 + 2x^2 - 5x + 1?",
+      "expected_output": "Computational result showing the derivative 3x^2 + 4x - 5 with steps",
+      "files": [],
+      "assertions": [
+        {
+          "name": "uses_wolfram_alpha",
+          "description": "Should use mcpjose_wolfram_alpha tool",
+          "type": "tool_usage",
+          "expected": "mcpjose_wolfram_alpha"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Convert 100 miles per hour to kilometers per hour",
+      "expected_output": "Unit conversion showing 160.934 km/h or equivalent",
+      "files": [],
+      "assertions": [
+        {
+          "name": "uses_wolfram_alpha",
+          "description": "Should use mcpjose_wolfram_alpha tool",
+          "type": "tool_usage",
+          "expected": "mcpjose_wolfram_alpha"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "What is the current stock price of Apple?",
+      "expected_output": "Current AAPL stock price with market data",
+      "files": [],
+      "assertions": [
+        {
+          "name": "uses_wolfram_alpha",
+          "description": "Should use mcpjose_wolfram_alpha tool for financial data",
+          "type": "tool_usage",
+          "expected": "mcpjose_wolfram_alpha"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "What is the speed of light in miles per second?",
+      "expected_output": "Scientific constant value with context",
+      "files": [],
+      "assertions": [
+        {
+          "name": "uses_wolfram_alpha",
+          "description": "Should use mcpjose_wolfram_alpha for scientific data",
+          "type": "tool_usage",
+          "expected": "mcpjose_wolfram_alpha"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "If I'm 5'10 and weigh 165 lbs, what is my BMI?",
+      "expected_output": "BMI calculation with health category",
+      "files": [],
+      "assertions": [
+        {
+          "name": "uses_wolfram_alpha",
+          "description": "Should use mcpjose_wolfram_alpha for BMI calculation",
+          "type": "tool_usage",
+          "expected": "mcpjose_wolfram_alpha"
+        }
+      ]
+    }
+  ]
+}
