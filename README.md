@@ -23,7 +23,7 @@
 - **Rate Limiting**: Built-in rate limiting for API calls
 
 ### Development & Agent Support
-- **Agent Skills**: 15+ specialized skills for coding agents (document creation, design, web development, research)
+- **Agent Skills**: 15+ specialized skills for coding agents (document creation, design, web development, research, symbolic computation)
 - **LangChain Agent**: Dedicated LangChain tool-calling agent wired to project tools, skills, and `AGENTS.md`
 - **CLI Interface**: Command-line tools for direct tool execution
 - **Provider Pattern**: Clean abstraction for different AI service providers
@@ -165,6 +165,7 @@ The following tools are available when running the MCP server:
 | `transcribe_audio` | Transcribe audio files | `audio_path`, `model`, `language` |
 | `generate_image` | Generate images with Gemini | `prompt`, `output_path` |
 | `google_ocr` | Extract text with Google Vision | `input_file`, `file_type` |
+| `wolfram_alpha` | Query Wolfram|Alpha for computed and symbolic answers | `query`, `maxchars`, `units`, `assumption` |
 | `send_ws_msg` | Send WhatsApp messages to any destination or default fallback | `destination` (optional), `message`, `template_name` (optional) |
 
 ### Agent Skills
@@ -175,9 +176,10 @@ The project includes 15+ specialized Agent Skills for coding agents:
 - **Design & Visual Content**: `frontend-design`, `canvas-design`, `algorithmic-art`, `slack-gif-creator`, `theme-factory`
 - **Web Development**: `web-artifacts-builder`, `webapp-testing`
 - **Communication & Internal Tools**: `internal-comms`, `brand-guidelines`
+- **Math & Computation**: `wolfram-alpha`
 - **Meta Skills**: `skill-creator`
 
-Skills are automatically discovered from `.agents/skills/` and provide domain-specific knowledge, structured workflows, and best practices.
+Skills are automatically discovered from `.agents/skills/` and `skills/` and provide domain-specific knowledge, structured workflows, and best practices.
 
 ## Development
 
