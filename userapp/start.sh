@@ -32,6 +32,8 @@ required_plan_files=(
   "$PLAN_DIR/DataSchema.json"
   "$PLAN_DIR/ExecutionPlan.json"
   "$PLAN_DIR/ValidationRules.json"
+  "$PLAN_DIR/TaskTree.json"
+  "$PLAN_DIR/AtomicTasks.json"
 )
 
 read -r -d '' decompose_prompt <<EOF_PROMPT || true
@@ -68,7 +70,7 @@ Task:
 $main_task
 
 Execution requirements:
-- Read and follow ReasoningChain.json, FinalArtifactSpec.json, DataSources.json, DataSchema.json, ExecutionPlan.json, and ValidationRules.json.
+- Read and follow ReasoningChain.json, FinalArtifactSpec.json, DataSources.json, DataSchema.json, ExecutionPlan.json, ValidationRules.json, TaskTree.json, and AtomicTasks.json.
 - Execute the plan in dependency order.
 - Use the planning artifacts as constraints during implementation.
 - Validate the work against the defined quality gates before finishing.
