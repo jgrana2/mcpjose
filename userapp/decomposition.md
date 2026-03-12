@@ -227,9 +227,12 @@ For each critical decision point (marked in ExecutionPlan):
   - Timeout threshold exceeded
   - Cost limit reached
   - Quality below minimum
+- **User Question Requirement**: BEFORE automatically switching to fallback branch, you MUST ask the user via multiple choice question (see "Mandatory User Questions" section)
+  - Exception: Only skip asking if the fallback branch requires NO synthetic data (e.g., switching from API A to API B, both with real credentials)
+  - If fallback would use cached data, expert-curated lists, or synthetic generation → MUST ask user first
 - **State preservation**: What context to save before switching
 - **Rollback procedure**: How to cleanly exit current branch
-- **Branch switch**: How to activate fallback path
+- **Branch switch**: How to activate fallback path (only after user approval if synthetic data involved)
 
 #### 8B: Parallel Exploration (Optional for High-Stakes Tasks)
 For critical data requirements, execute top 2 branches in parallel:
@@ -246,6 +249,114 @@ During execution, allow dynamic re-evaluation:
 - Switch to alternative if justified by data
 
 **Output:** `Plan/BacktrackingStrategy.json`
+
+## Mandatory User Questions - STOP AND ASK
+
+**CRITICAL:** Before taking ANY fallback action or making assumptions, you MUST ask the user via multiple choice questions. NEVER proceed with synthetic data, cached datasets, or invented information without explicit user approval.
+
+### When You MUST Ask (No Exceptions)
+
+**STOP execution and ask the user when:**
+
+1. **Missing API Credentials**
+   - Google Maps API key not found
+   - LinkedIn credentials unavailable
+   - Hunter.io/RocketReach API keys missing
+   - Any required authentication token absent
+
+2. **Data Source Unavailable**
+   - Primary data source returns errors
+   - Web scraping blocked by anti-bot measures
+   - Database connection fails
+   - Rate limits exceeded with no quota remaining
+
+3. **Fallback Would Require Synthetic Data**
+   - Using "expert-curated" leads instead of real-time collection
+   - Generating sample/mock data to fill gaps
+   - Using cached datasets from previous runs
+   - Creating fictional scenarios or examples
+
+4. **Assumptions Required**
+   - Missing critical business context
+   - Undefined target market parameters
+   - Unknown budget or capacity constraints
+   - Ambiguous success criteria
+
+5. **Quality Below Threshold**
+   - Less than 80% data completeness
+   - Unable to verify contact information
+   - Data freshness concerns
+   - Validation checks failing
+
+### Question Format
+
+**Always use the question tool with multiple choice options:**
+
+```
+question({
+  "questions": [{
+    "header": "Missing Resource",
+    "question": "[Specific situation] - How should I proceed?",
+    "options": [
+      {"label": "Wait for credentials", "description": "Pause execution until you provide [specific credential]"},
+      {"label": "Use alternative approach", "description": "I can try [alternative method] instead"},
+      {"label": "Proceed with limitations", "description": "Continue with reduced scope/quality - [specific limitations]"},
+      {"label": "Cancel task", "description": "Stop and report failure to complete as specified"}
+    ]
+  }]
+})
+```
+
+### What You MUST NOT Do Without Asking
+
+- ❌ Generate synthetic leads or "expert-curated" data
+- ❌ Use fallback cached datasets from previous executions
+- ❌ Invent contact information (emails, phone numbers, LinkedIn URLs)
+- ❌ Assume company details without verification
+- ❌ Proceed with placeholder data marked as "unverified"
+- ❌ Create mock data to demonstrate what the output "would look like"
+- ❌ Use templates or examples as if they were real results
+
+### Valid Responses and Actions
+
+**If user selects "Wait for credentials":**
+- Pause execution
+- List exactly what credentials are needed
+- Provide setup instructions
+- Resume only after confirmation
+
+**If user selects "Use alternative approach":**
+- Document the alternative in ExecutionReport.json
+- Explain trade-offs vs. original plan
+- Proceed with user's chosen alternative
+
+**If user selects "Proceed with limitations":**
+- Document specific limitations in ExecutionReport.json
+- Adjust quality metrics accordingly
+- Be explicit about what's missing
+
+**If user selects "Cancel task":**
+- Stop immediately
+- Report what was completed
+- Explain what blocked completion
+
+### Documentation Requirement
+
+Every user question and response MUST be recorded in `Plan/ExecutionReport.json`:
+
+```json
+{
+  "user_questions": [
+    {
+      "timestamp": "2026-03-11T10:30:00Z",
+      "question": "API credentials missing - how to proceed?",
+      "options_presented": ["Wait", "Alternative", "Proceed", "Cancel"],
+      "user_selection": "Wait for credentials",
+      "execution_action": "Paused pending Google Maps API key"
+    }
+  ]
+}
+```
 
 ## Critical Rules
 
@@ -277,6 +388,10 @@ During execution, allow dynamic re-evaluation:
 - **Choose a single path without documenting fallbacks**
 - **Ignore branch switching costs and rollback procedures**
 - **Apply parallel execution everywhere** (only for critical, high-uncertainty tasks)
+- **Proceed with fallback actions WITHOUT asking the user first** (see "Mandatory User Questions" section above)
+- **Generate synthetic, mock, or "expert-curated" data without explicit user approval**
+- **Use cached datasets from previous runs as if they were real-time results**
+- **Continue execution when critical resources are missing - STOP and ask instead**
 
 ## Output Format
 
@@ -378,8 +493,12 @@ Generate 9 JSON files in the `Plan/` directory:
        - `tool_or_endpoint`: Command, API endpoint, scraper target, or query
        - `validation_check`: Directly testable check
        - `retry_policy`: Retry count/backoff/conditions
-       - `failure_mode`: Fail-fast vs continue-with-warning
-       - `completion_proof`: Artifact or signal proving success
+        - `failure_mode`: Fail-fast vs continue-with-warning vs ask-user (preferred when synthetic data would be needed)
+        - `user_question_policy`: When task failure requires asking user before fallback
+          - `ask_before_fallback`: Boolean - if true, must use question tool before any alternative branch
+          - `question_template`: Reference to question format for this failure type
+          - `allowed_user_responses`: ["provide_credentials", "use_alternative", "proceed_with_limitations", "cancel_task"]
+        - `completion_proof`: Artifact or signal proving success
        - `branch_alternatives`: Array of alternative implementations (from ToT evaluation)
          - `alt_id`: Alternative identifier
          - `alt_action`: Alternative action description
@@ -419,3 +538,43 @@ Generate 9 JSON files in the `Plan/` directory:
        - `reeval_frequency`: How often to check performance
 
 Save all files to `Plan/` directory with properly formatted JSON.
+
+## Execution Behavior
+
+### Before ANY Action That Uses Synthetic Data
+
+1. **STOP execution immediately**
+2. **Use the question tool** to present multiple choice options
+3. **Wait for user response** - do not proceed with any default action
+4. **Document the interaction** in ExecutionReport.json
+5. **Only proceed** with the specific option the user selected
+
+### Valid User Question Patterns
+
+**For missing credentials:**
+- Option 1: "Pause and wait for credentials" (recommended)
+- Option 2: "Skip this data source and continue with reduced scope"
+- Option 3: "Cancel this task entirely"
+
+**For synthetic data fallback:**
+- Option 1: "Use expert-curated dataset" (only if user explicitly approves)
+- Option 2: "Generate synthetic leads with clear labeling" (with warnings)
+- Option 3: "Switch to manual research mode" (you guide user)
+- Option 4: "Cancel and report failure" (recommended if quality matters)
+
+**For assumptions needed:**
+- Present 2-3 reasonable assumptions
+- Let user select or provide their own
+- Document the chosen assumption in ReasoningChain.json
+
+### What Constitutes "Synthetic Data"
+
+Any data that is NOT collected in real-time from actual sources:
+- Pre-populated lead lists in Python scripts
+- "Expert-curated" datasets from previous runs
+- Mock data to "demonstrate what output would look like"
+- Template-based generation
+- AI-generated fictional companies or contacts
+- Cached results presented as fresh data
+
+**Rule: If you didn't collect it live from an API, database, or website during THIS execution, it requires user approval to use.**
