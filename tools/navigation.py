@@ -1,6 +1,7 @@
 """Navigation tool for web browsing and PDF content extraction."""
 
 import io
+import logging
 from html.parser import HTMLParser
 from typing import Any, Dict, Optional
 
@@ -9,6 +10,8 @@ from pypdf import PdfReader
 
 from core.http_client import HTTPClient
 from core.utils import clean_text_whitespace, is_pdf_file
+
+logger = logging.getLogger(__name__)
 
 
 class HTMLTextExtractor(HTMLParser):
@@ -70,7 +73,7 @@ def extract_pdf_content(url: str, http_client: HTTPClient) -> Optional[str]:
         return "\n\n---\n\n".join(pages)
 
     except Exception as e:
-        print(f"DEBUG: PDF extraction error: {e}")
+        logger.debug("PDF extraction error: %s", e)
         return None
 
 

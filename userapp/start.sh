@@ -1,80 +1,97 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+# En lugar de esto:
+# opencode --prompt "$execute_prompt"
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Esto:
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PLAN_DIR="$SCRIPT_DIR/Plan"
 
-cd "$SCRIPT_DIR"
+mode="${1:-}"
+task_id=""
 
-if ! command -v opencode >/dev/null 2>&1; then
-  echo "Error: 'opencode' is not installed or not on PATH." >&2
-  exit 1
+if [[ "$mode" != "--until-done" ]]; then
+  task_id="$mode"
 fi
 
-main_task="${*:-}"
+outputs_dir="$SCRIPT_DIR/outputs"
+mkdir -p "$outputs_dir"
 
-if [[ -z "$main_task" ]]; then
-  read -r -p "Enter the main task to decompose: " main_task
+get_first_pending_task_id() {
+  PLAN_DIR="$PLAN_DIR" OUTPUTS_DIR="$outputs_dir" python3 - <<'PY'
+import json
+import os
+
+plan_dir = os.environ["PLAN_DIR"]
+outputs_dir = os.environ["OUTPUTS_DIR"]
+
+with open(os.path.join(plan_dir, "AtomicTasks.json"), encoding="utf-8") as f:
+    tasks = json.load(f)
+
+for t in tasks["atomic_tasks"]:
+    out_file = os.path.join(outputs_dir, f"{t['task_id']}.json")
+    if not os.path.exists(out_file):
+        print(t["task_id"])
+        break
+PY
+}
+
+if [[ "$mode" == "--until-done" ]]; then
+  while true; do
+    current_task_id="$(get_first_pending_task_id)"
+    if [[ -z "$current_task_id" ]]; then
+      echo "All tasks completed."
+      exit 0
+    fi
+
+    echo "Running next pending task: $current_task_id"
+    "$0" "$current_task_id" || exit $?
+  done
 fi
 
-if [[ -z "${main_task// }" ]]; then
-  echo "Error: task cannot be empty." >&2
-  exit 1
+if [[ -z "$task_id" ]]; then
+  task_id="$(get_first_pending_task_id)"
 fi
 
-mkdir -p "$PLAN_DIR"
+if [[ -z "$task_id" ]]; then
+  echo "No pending atomic tasks found."
+  exit 0
+fi
 
-required_plan_files=(
-  "$PLAN_DIR/ReasoningChain.json"
-  "$PLAN_DIR/FinalArtifactSpec.json"
-  "$PLAN_DIR/DataSources.json"
-  "$PLAN_DIR/DataSchema.json"
-  "$PLAN_DIR/ExecutionPlan.json"
-  "$PLAN_DIR/ValidationRules.json"
-  "$PLAN_DIR/TaskTree.json"
-  "$PLAN_DIR/AtomicTasks.json"
+task_json=$(PLAN_DIR="$PLAN_DIR" TASK_ID="$task_id" python3 - <<'PY'
+import json
+import os
+
+plan_dir = os.environ["PLAN_DIR"]
+task_id = os.environ["TASK_ID"]
+
+with open(os.path.join(plan_dir, "AtomicTasks.json"), encoding="utf-8") as f:
+  tasks = json.load(f)
+
+t = next(t for t in tasks["atomic_tasks"] if t["task_id"] == task_id)
+print(json.dumps(t, indent=2))
+PY
 )
 
-read -r -d '' decompose_prompt <<EOF_PROMPT || true
-You are working inside the git repository at $SCRIPT_DIR.
+task_prompt="You are working inside $SCRIPT_DIR.
 
-Read $SCRIPT_DIR/decomposition.md and decompose this task into the required planning artifacts:
-
-$main_task
-
-Requirements:
-- Follow decomposition.md exactly.
-- Create or overwrite all required JSON files in $PLAN_DIR.
-- Produce only the planning artifacts; do not execute the plan yet.
-- Ensure every JSON file is valid and internally consistent.
-- Briefly confirm which files were created at the end.
-EOF_PROMPT
-
-opencode run "$decompose_prompt"
-
-for file in "${required_plan_files[@]}"; do
-  if [[ ! -s "$file" ]]; then
-    echo "Error: required plan artifact missing or empty: $file" >&2
-    exit 1
-  fi
-  python3 -m json.tool "$file" >/dev/null
-done
-
-read -r -d '' execute_prompt <<EOF_PROMPT || true
-You are working inside the git repository at $SCRIPT_DIR.
-
-Execute the task using the plan artifacts in $PLAN_DIR.
+Execute this single atomic task only. Do not proceed to other tasks.
 
 Task:
-$main_task
+$task_json
 
-Execution requirements:
-- Read and follow ReasoningChain.json, FinalArtifactSpec.json, DataSources.json, DataSchema.json, ExecutionPlan.json, ValidationRules.json, TaskTree.json, and AtomicTasks.json.
-- Execute the plan in dependency order.
-- Use the planning artifacts as constraints during implementation.
-- Validate the work against the defined quality gates before finishing.
-- If you must ask for clarification, use a multiple choice format.
-EOF_PROMPT
+Previous outputs available in: $outputs_dir
 
-opencode --prompt "$execute_prompt"
+Instructions:
+- Produce the actual deliverable of this task (files, code, data) directly in $SCRIPT_DIR.
+- The deliverable location and format are defined in the task's exact_outputs field.
+- After completing the task, save a completion record to $outputs_dir/${task_id}.json with:
+  {
+    \"task_id\": \"$task_id\",
+    \"status\": \"completed\",
+    \"outputs_produced\": [list of files created],
+    \"notes\": \"any relevant observations\"
+  }"
+
+echo "Executing task: $task_id"
+opencode run "$task_prompt"
