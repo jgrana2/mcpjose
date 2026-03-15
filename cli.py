@@ -122,15 +122,23 @@ def transcribe_audio_main():
     parser.add_argument("audio_path", help="Path to audio file")
     parser.add_argument("--model", default="gpt-4o-transcribe", help="Model to use")
     parser.add_argument("--language", default=None, help="Language code (e.g., en, es)")
-    parser.add_argument("--format", default="text", help="Response format (text, json, verbose_json, srt, vtt)")
-    parser.add_argument("--timestamps", action="store_true", help="Include word-level timestamps")
-    parser.add_argument("--prompt", default=None, help="Context hint for better accuracy")
+    parser.add_argument(
+        "--format",
+        default="text",
+        help="Response format (text, json, verbose_json, srt, vtt)",
+    )
+    parser.add_argument(
+        "--timestamps", action="store_true", help="Include word-level timestamps"
+    )
+    parser.add_argument(
+        "--prompt", default=None, help="Context hint for better accuracy"
+    )
     parser.add_argument("--output", default=None, help="Output file path")
 
     args = parser.parse_args()
 
     provider = ProviderFactory.create_transcription("openai")
-    
+
     kwargs = {"model": args.model, "response_format": args.format}
     if args.language:
         kwargs["language"] = args.language
@@ -141,26 +149,83 @@ def transcribe_audio_main():
 
     try:
         result = provider.transcribe(args.audio_path, **kwargs)
-        
+
         # Format output based on response type
         if args.format == "text":
             output = result if isinstance(result, str) else result.text
         else:
             import json
+
             if hasattr(result, "model_dump"):
                 output = json.dumps(result.model_dump(), indent=2)
             elif hasattr(result, "dict"):
                 output = json.dumps(result.dict(), indent=2)
             else:
                 output = str(result)
-        
+
         if args.output:
             with open(args.output, "w") as f:
                 f.write(output)
             print(f"Saved to {args.output}")
         else:
             print(output)
-    
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def google_maps_search_main():
+    """CLI entry point for Google Maps Places search."""
+    parser = argparse.ArgumentParser(
+        description="Search places using Google Maps Places API"
+    )
+    parser.add_argument(
+        "query", help="Search query (e.g., 'coffee shop', 'restaurants')"
+    )
+    parser.add_argument(
+        "--location", default=None, help="Location bias as 'lat,lng' or address"
+    )
+    parser.add_argument(
+        "--radius", type=int, default=None, help="Search radius in meters"
+    )
+    parser.add_argument(
+        "--type", default=None, help="Place type filter (e.g., 'cafe', 'restaurant')"
+    )
+    parser.add_argument(
+        "--max-results", type=int, default=5, help="Maximum results to return"
+    )
+    parser.add_argument("--output", default=None, help="Output file path (JSON format)")
+
+    args = parser.parse_args()
+
+    try:
+        provider = ProviderFactory.create_maps("google")
+        results = provider.search_places(
+            query=args.query,
+            location=args.location,
+            radius=args.radius,
+            place_type=args.type,
+            max_results=args.max_results,
+        )
+
+        if args.output:
+            import json
+
+            with open(args.output, "w") as f:
+                json.dump(results, f, indent=2)
+            print(f"Saved {len(results)} results to {args.output}")
+        else:
+            print(f"Found {len(results)} places for '{args.query}':")
+            for i, place in enumerate(results, 1):
+                print(f"\n{i}. {place.get('name', 'Unknown')}")
+                print(f"   Address: {place.get('address', 'N/A')}")
+                print(
+                    f"   Rating: {place.get('rating', 'N/A')} ({place.get('user_ratings_total', 0)} reviews)"
+                )
+                print(f"   Place ID: {place.get('place_id', 'N/A')}")
+                print(f"   Types: {', '.join(place.get('types', []))}")
+
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

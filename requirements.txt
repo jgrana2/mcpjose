@@ -11,3 +11,4 @@ pypdf
 requests
 langchain
 langchain-openai
+googlemaps==4.10.0

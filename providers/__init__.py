@@ -30,6 +30,9 @@ from core.utils import (
     detect_mime_type,
 )
 
+# Import Google Maps provider
+from .google_maps import GoogleMapsProvider
+
 
 class OpenAIClient:
     """Lazy-initialized OpenAI client singleton."""
@@ -114,9 +117,18 @@ class GeminiVisionProvider(VisionProvider):
         credentials = service_account.Credentials.from_service_account_file(
             creds["credentials_path"]
         )
-        vertexai.init(
-            project=creds["project_id"], location="global", credentials=credentials
-        )
+        # Vertex AI multimodal models require a regional location ("global" is unsupported).
+        region = os.getenv("VERTEX_AI_REGION") or os.getenv("GOOGLE_CLOUD_REGION") or "us-central1"
+        try:
+            vertexai.init(
+                project=creds["project_id"], location=region, credentials=credentials
+            )
+        except ValueError as exc:
+            if "Unsupported region for Vertex AI" not in str(exc) or region == "us-central1":
+                raise
+            vertexai.init(
+                project=creds["project_id"], location="us-central1", credentials=credentials
+            )
 
     @property
     def name(self) -> str:
@@ -202,7 +214,7 @@ class OpenAITranscriptionProvider:
 
     def transcribe(self, audio_path: Union[str, Path], **kwargs) -> Any:
         """Transcribe audio file to text.
-        
+
         Args:
             audio_path: Path to audio file (mp3, mp4, mpeg, mpga, m4a, wav, webm)
             **kwargs: Additional parameters passed to OpenAI API:
@@ -211,16 +223,16 @@ class OpenAITranscriptionProvider:
                 - response_format: Output format (text, json, verbose_json, srt, vtt)
                 - timestamp_granularities: List of granularities (['word'] or ['segment'])
                 - prompt: Context hint for better accuracy
-        
+
         Returns:
             Transcription result (format depends on response_format parameter)
         """
         audio_path = Path(audio_path)
-        
+
         # Validate file exists
         if not audio_path.exists():
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
-        
+
         # Check file size (OpenAI limit is 25MB)
         file_size_mb = audio_path.stat().st_size / (1024 * 1024)
         if file_size_mb > 25:
@@ -228,15 +240,15 @@ class OpenAITranscriptionProvider:
                 f"Audio file size ({file_size_mb:.1f}MB) exceeds 25MB limit. "
                 "Please split the file into smaller chunks."
             )
-        
+
         # Open and transcribe
         with open(audio_path, "rb") as audio_file:
             response = self.client.audio.transcriptions.create(
                 model=kwargs.get("model", self.model),
                 file=audio_file,
-                **{k: v for k, v in kwargs.items() if k != "model"}
+                **{k: v for k, v in kwargs.items() if k != "model"},
             )
-        
+
         return response
 
 
@@ -251,7 +263,10 @@ class GeminiImageGenerator(ImageGenerator):
     def _init_client(self) -> None:
         """Lazy initialization of the GenAI client."""
         if self._client is None:
-            self._client = google_genai.Client()
+            from core.config import CredentialManager
+
+            api_key = CredentialManager().get_config().google_api_key
+            self._client = google_genai.Client(api_key=api_key)
 
     @property
     def name(self) -> str:
@@ -422,6 +437,10 @@ class ProviderFactory:
         "openai": OpenAITranscriptionProvider,
     }
 
+    _maps_providers = {
+        "google": GoogleMapsProvider,
+    }
+
     @classmethod
     def create_vision(cls, provider: str = "openai", **kwargs) -> VisionProvider:
         if provider not in cls._vision_providers:
@@ -449,7 +468,15 @@ class ProviderFactory:
         return cls._ocr_providers[provider](**kwargs)
 
     @classmethod
-    def create_transcription(cls, provider: str = "openai", **kwargs) -> OpenAITranscriptionProvider:
+    def create_transcription(
+        cls, provider: str = "openai", **kwargs
+    ) -> OpenAITranscriptionProvider:
         if provider not in cls._transcription_providers:
             raise ValueError(f"Unknown transcription provider: {provider}")
         return cls._transcription_providers[provider](**kwargs)
+
+    @classmethod
+    def create_maps(cls, provider: str = "google", **kwargs) -> GoogleMapsProvider:
+        if provider not in cls._maps_providers:
+            raise ValueError(f"Unknown maps provider: {provider}")
+        return cls._maps_providers[provider](**kwargs)

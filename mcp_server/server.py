@@ -1,5 +1,6 @@
 """Unified MCP server with all tools."""
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -26,6 +27,9 @@ from providers.search import SearchFactory
 from tools.navigation import init_tools as init_navigation_tools
 from tools.whatsapp import init_tools as init_whatsapp_tools
 from tools.wolfram_alpha import init_tools as init_wolfram_alpha_tools
+from tools.google_maps import init_tools as init_google_maps_tools
+
+logger = logging.getLogger(__name__)
 
 
 def create_server() -> FastMCP:
@@ -47,6 +51,9 @@ def create_server() -> FastMCP:
 
     # Initialize Wolfram Alpha tools
     init_wolfram_alpha_tools(mcp)
+
+    # Initialize Google Maps tools
+    init_google_maps_tools(mcp)
 
     # Initialize AI tools
     _init_ai_tools(mcp)
@@ -83,38 +90,39 @@ def _init_ai_tools(mcp: FastMCP) -> None:
     openai_vision = None
     gemini_vision = None
     openai_llm = None
+    transcription = None
     image_gen = None
     ocr = None
 
     try:
         openai_vision = ProviderFactory.create_vision("openai")
     except Exception as e:
-        print(f"Warning: Could not initialize OpenAI vision: {e}")
+        logger.warning("Could not initialize OpenAI vision: %s", e)
 
     try:
         gemini_vision = ProviderFactory.create_vision("gemini")
     except Exception as e:
-        print(f"Warning: Could not initialize Gemini vision: {e}")
+        logger.warning("Could not initialize Gemini vision: %s", e)
 
     try:
         openai_llm = ProviderFactory.create_llm("openai")
     except Exception as e:
-        print(f"Warning: Could not initialize OpenAI LLM: {e}")
+        logger.warning("Could not initialize OpenAI LLM: %s", e)
 
     try:
         transcription = ProviderFactory.create_transcription("openai")
     except Exception as e:
-        print(f"Warning: Could not initialize OpenAI transcription: {e}")
+        logger.warning("Could not initialize OpenAI transcription: %s", e)
 
     try:
         image_gen = ProviderFactory.create_image_generator("gemini")
     except Exception as e:
-        print(f"Warning: Could not initialize Gemini image generator: {e}")
+        logger.warning("Could not initialize Gemini image generator: %s", e)
 
     try:
         ocr = ProviderFactory.create_ocr("google")
     except Exception as e:
-        print(f"Warning: Could not initialize Google OCR: {e}")
+        logger.warning("Could not initialize Google OCR: %s", e)
 
     if openai_llm:
 
@@ -160,16 +168,16 @@ def _init_ai_tools(mcp: FastMCP) -> None:
             """
             try:
                 # Build kwargs for API call
-                kwargs = {"model": model, "response_format": response_format}
+                api_kwargs = {"model": model, "response_format": response_format}
                 if language:
-                    kwargs["language"] = language
+                    api_kwargs["language"] = language
                 if timestamp_granularities:
-                    kwargs["timestamp_granularities"] = timestamp_granularities
+                    api_kwargs["timestamp_granularities"] = timestamp_granularities
                 if prompt:
-                    kwargs["prompt"] = prompt
+                    api_kwargs["prompt"] = prompt
 
                 # Call transcription provider
-                result = transcription.transcribe(audio_path, **kwargs)
+                result = transcription.transcribe(audio_path, **api_kwargs)
 
                 # Handle different response formats
                 if response_format == "text":
@@ -316,12 +324,12 @@ def _init_ai_tools(mcp: FastMCP) -> None:
         IMPORTANT: X (Twitter) uses DETERMINISTIC keyword matching, not heuristic search.
         For best results, use SHORT, SPECIFIC keywords (max 3 words recommended).
         The tool automatically extracts up to 3 key words from longer queries.
-        
+
         Examples of good queries:
         - "AI agents" (2 words)
         - "climate change technology" (3 words)
         - "Python FastAPI" (2 words)
-        
+
         Avoid: Long sentences, common words, or overly generic terms.
 
         Args:
@@ -330,23 +338,63 @@ def _init_ai_tools(mcp: FastMCP) -> None:
         Returns:
             Dictionary with 'text' (concatenated tweets), 'count' (int), 'topic', and 'search_query'
         """
-        
+
         # Common stop words to filter out for better keyword extraction
         stop_words = {
-            'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
-            'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the',
-            'to', 'was', 'will', 'with', 'about', 'how', 'what', 'when', 'where',
-            'who', 'why', 'which', 'de', 'para', 'con', 'sin', 'la', 'el', 'los', 'las', 'un', 'una', 'unos', 'unas'
+            "a",
+            "an",
+            "and",
+            "are",
+            "as",
+            "at",
+            "be",
+            "by",
+            "for",
+            "from",
+            "has",
+            "he",
+            "in",
+            "is",
+            "it",
+            "its",
+            "of",
+            "on",
+            "that",
+            "the",
+            "to",
+            "was",
+            "will",
+            "with",
+            "about",
+            "how",
+            "what",
+            "when",
+            "where",
+            "who",
+            "why",
+            "which",
+            "de",
+            "para",
+            "con",
+            "sin",
+            "la",
+            "el",
+            "los",
+            "las",
+            "un",
+            "una",
+            "unos",
+            "unas",
         }
-        
+
         # Extract keywords: remove stop words and keep max 3 meaningful words
         words = topic.lower().split()
         keywords = [w for w in words if w not in stop_words and len(w) > 2][:3]
-        
+
         # If no keywords remain after filtering, use first 3 words of original
         if not keywords:
             keywords = words[:3]
-        
+
         search_query = " ".join(keywords)
 
         api = API()
@@ -362,8 +410,13 @@ def _init_ai_tools(mcp: FastMCP) -> None:
         if not all([username, password, email, api_key, cookies_str]):
             raise ValueError("Missing required TwScrape environment variables")
 
+        # Type assertions since we've checked they're not None
         await api.pool.add_account(
-            username, password, email, api_key, cookies=cookies_str
+            str(username),
+            str(password),
+            str(email),
+            str(api_key),
+            cookies=str(cookies_str),
         )
 
         # Search for tweets with improved error handling
