@@ -6,6 +6,7 @@
 # Esto:
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PLAN_DIR="$SCRIPT_DIR/Plan"
+ATOMIC_TASKS_FILE="$PLAN_DIR/AtomicTasks.json"
 
 mode="${1:-}"
 task_id=""
@@ -16,6 +17,44 @@ fi
 
 outputs_dir="$SCRIPT_DIR/outputs"
 mkdir -p "$outputs_dir"
+
+ensure_plan_exists() {
+  if [[ -f "$ATOMIC_TASKS_FILE" ]]; then
+    return 0
+  fi
+
+  echo "No execution plan found in $PLAN_DIR."
+  read -r -p "Enter the task to decompose and execute: " user_request
+
+  if [[ -z "$user_request" ]]; then
+    echo "A task description is required to generate the plan."
+    exit 1
+  fi
+
+  mkdir -p "$PLAN_DIR"
+
+  plan_prompt=$(cat <<EOF
+You are working inside $SCRIPT_DIR.
+
+Use the following decomposition framework exactly and generate the required JSON planning files in $PLAN_DIR.
+Do not execute any atomic tasks yet. Only create the plan artifacts.
+
+Framework:
+$(cat "$SCRIPT_DIR/decomposition.md")
+
+User request:
+$user_request
+EOF
+)
+
+  echo "Generating execution plan..."
+  opencode run "$plan_prompt" || exit $?
+
+  if [[ ! -f "$ATOMIC_TASKS_FILE" ]]; then
+    echo "Plan generation did not produce $ATOMIC_TASKS_FILE."
+    exit 1
+  fi
+}
 
 get_first_pending_task_id() {
   PLAN_DIR="$PLAN_DIR" OUTPUTS_DIR="$outputs_dir" python3 - <<'PY'
@@ -35,6 +74,8 @@ for t in tasks["atomic_tasks"]:
         break
 PY
 }
+
+ensure_plan_exists
 
 if [[ "$mode" == "--until-done" ]]; then
   while true; do
