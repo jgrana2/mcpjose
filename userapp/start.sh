@@ -40,7 +40,7 @@ Use the following decomposition framework exactly and generate the required JSON
 Do not execute any atomic tasks yet. Only create the plan artifacts.
 
 Framework:
-$(cat "$SCRIPT_DIR/decomposition.md")
+$(cat "$SCRIPT_DIR/DECOMPOSITION.md")
 
 User request:
 $user_request
