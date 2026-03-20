@@ -146,8 +146,8 @@ python -m langchain_agent.main --list-skills
 # Run a one-shot prompt
 python -m langchain_agent.main "Use available skills and tools to research MCP updates"
 
-# Run interactively
-python -m langchain_agent.main --interactive
+# Run over WhatsApp
+python -m langchain_agent.main --whatsapp
 ```
 
 ## Available Tools
@@ -167,6 +167,37 @@ The following tools are available when running the MCP server:
 | `google_ocr` | Extract text with Google Vision | `input_file`, `file_type` |
 | `wolfram_alpha` | Query Wolfram|Alpha for computed and symbolic answers | `query`, `maxchars`, `units`, `assumption` |
 | `send_ws_msg` | Send WhatsApp messages to any destination or default fallback | `destination` (optional), `message`, `template_name` (optional) |
+| `get_ws_messages` | Fetch recent WhatsApp messages from webhook storage | `limit` (optional, default 10), `since` (optional, ISO 8601 timestamp) |
+
+### WhatsApp Webhook Setup
+
+To receive messages, you need to run the webhook server:
+
+```bash
+# Start the webhook server
+python cli.py whatsapp-webhook --port 5000
+
+# Or with custom options
+python cli.py whatsapp-webhook --host 0.0.0.0 --port 5000
+```
+
+Then configure in Meta Developer dashboard:
+
+1. **Go to:** Meta Developers → Your App → WhatsApp → Configuration
+2. **Webhook URL:** `https://your-domain.com/webhook` (use ngrok for local testing)
+3. **Verify Token:** Set in `WHATSAPP_WEBHOOK_VERIFY_TOKEN` env var
+4. **Subscribe to fields:** `messages`
+
+For local testing with ngrok:
+```bash
+# Terminal 1: Start webhook server
+python cli.py whatsapp-webhook --port 5000
+
+# Terminal 2: Expose via ngrok
+ngrok http 5000
+
+# Use the ngrok HTTPS URL in Meta dashboard
+```
 
 ### Agent Skills
 The project includes 15+ specialized Agent Skills for coding agents:

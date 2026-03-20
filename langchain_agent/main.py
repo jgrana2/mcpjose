@@ -8,12 +8,7 @@ from pathlib import Path
 
 from .agent import MCPJoseLangChainAgent
 from .context import ProjectContextLoader
-
-try:
-    from langchain_core.messages import AIMessage, HumanMessage
-except Exception:  # pragma: no cover - dependency guard
-    AIMessage = None
-    HumanMessage = None
+from .whatsapp_runner import run_whatsapp_loop
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,7 +27,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--verbose", action="store_true", help="Enable LangChain verbose logs"
     )
     parser.add_argument(
-        "--interactive", action="store_true", help="Run interactive chat loop"
+        "--whatsapp",
+        action="store_true",
+        help="Run the WhatsApp-only agent loop",
+    )
+    parser.add_argument(
+        "--whatsapp-allowed-sender",
+        default=None,
+        help="Only process messages from this WhatsApp number",
+    )
+    parser.add_argument(
+        "--whatsapp-poll-seconds",
+        type=int,
+        default=3,
+        help="WhatsApp polling interval in seconds",
     )
     parser.add_argument(
         "--list-tools", action="store_true", help="List registered tool names"
@@ -52,6 +60,21 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     repo_root = Path(__file__).resolve().parent.parent
+
+    if args.whatsapp:
+        try:
+            run_whatsapp_loop(
+                model=args.model,
+                temperature=args.temperature,
+                max_iterations=args.max_iterations,
+                verbose=args.verbose,
+                allowed_sender=args.whatsapp_allowed_sender,
+                poll_seconds=args.whatsapp_poll_seconds,
+                repo_root=repo_root,
+            )
+            return 0
+        except KeyboardInterrupt:
+            return 0
 
     if args.show_context:
         loader = ProjectContextLoader(repo_root=repo_root)
@@ -81,35 +104,9 @@ def main() -> int:
             print(f"{skill['skill_id']}: {skill['description']}")
         return 0
 
-    if args.interactive:
-        print("Interactive mode. Type 'exit' or 'quit' to stop.")
-        chat_history = []
-        while True:
-            try:
-                prompt = input("\nYou> ").strip()
-            except (KeyboardInterrupt, EOFError):
-                print()
-                break
-
-            if prompt.lower() in {"exit", "quit"}:
-                break
-            if not prompt:
-                continue
-
-            try:
-                result = agent.invoke(prompt, chat_history=chat_history)
-                output = str(result.get("output", ""))
-                print(f"\nAgent> {output}")
-                if HumanMessage is not None and AIMessage is not None:
-                    chat_history.append(HumanMessage(content=prompt))
-                    chat_history.append(AIMessage(content=output))
-            except Exception as exc:
-                print(f"\nAgent error: {exc}", file=sys.stderr)
-        return 0
-
     if not args.prompt:
         parser.error(
-            "prompt is required unless --interactive, --list-tools, --list-skills, or --show-context is used"
+            "prompt is required unless --whatsapp, --list-tools, --list-skills, or --show-context is used"
         )
 
     try:
