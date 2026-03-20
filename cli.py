@@ -1,13 +1,21 @@
 """Simplified CLI entry points for direct tool execution."""
 
-import argparse
+# Load environment variables FIRST (before any other imports)
 import sys
 from pathlib import Path
+
+# Load .env before anything else
+from dotenv import load_dotenv
+
+env_file = Path(__file__).resolve().parent / "auth" / ".env"
+if env_file.exists():
+    load_dotenv(env_file)
+
+import argparse
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.config import CredentialManager
 from core.utils import load_text_file
 from providers import ProviderFactory
 
@@ -231,6 +239,49 @@ def google_maps_search_main():
         sys.exit(1)
 
 
+def main():
+    """Main CLI entry point with subcommands."""
+    parser = argparse.ArgumentParser(description="MCP Jose CLI Tools")
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # whatsapp-webhook command
+    webhook_parser = subparsers.add_parser(
+        "whatsapp-webhook", help="Run WhatsApp webhook server to receive messages"
+    )
+    webhook_parser.add_argument(
+        "--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)"
+    )
+    webhook_parser.add_argument(
+        "--port", type=int, default=5000, help="Port to bind to (default: 5000)"
+    )
+    webhook_parser.add_argument(
+        "--db-path",
+        default=None,
+        help="Path to SQLite database (default: auth/whatsapp_messages.sqlite)",
+    )
+
+    args = parser.parse_args()
+
+    if args.command == "whatsapp-webhook":
+        from pathlib import Path
+        from tools.whatsapp_webhook import run_webhook_server
+
+        db_path = Path(args.db_path) if args.db_path else None
+
+        print(f"Starting WhatsApp webhook server on {args.host}:{args.port}")
+        print(f"Database: {db_path or 'auth/whatsapp_messages.sqlite'}")
+        print("\nConfigure webhook URL in Meta Developer dashboard:")
+        print("  https://your-domain/webhook")
+        print("\nVerify token (set in WHATSAPP_WEBHOOK_VERIFY_TOKEN env var)")
+        print("\nPress Ctrl+C to stop")
+
+        try:
+            run_webhook_server(host=args.host, port=args.port, db_path=db_path)
+        except KeyboardInterrupt:
+            print("\nShutting down...")
+    else:
+        parser.print_help()
+
+
 if __name__ == "__main__":
-    # Default to call_llm if run directly
-    call_llm_main()
+    main()

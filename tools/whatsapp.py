@@ -12,7 +12,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from mcp.server.fastmcp import FastMCP
 from zoneinfo import ZoneInfo
@@ -71,6 +71,51 @@ class WhatsAppSendResult:
                 "remaining": self.rate_limit_remaining,
             }
         return data
+
+
+@dataclass(frozen=True)
+class WhatsAppMessage:
+    id: str
+    from_number: str
+    timestamp: str
+    type: str
+    body: Optional[str] = None
+    caption: Optional[str] = None
+    media_id: Optional[str] = None
+    media_type: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        data: Dict[str, Any] = {
+            "id": self.id,
+            "from": self.from_number,
+            "timestamp": self.timestamp,
+            "type": self.type,
+        }
+        if self.body:
+            data["body"] = self.body
+        if self.caption:
+            data["caption"] = self.caption
+        if self.media_id:
+            data["media_id"] = self.media_id
+        if self.media_type:
+            data["media_type"] = self.media_type
+        return data
+
+
+@dataclass(frozen=True)
+class WhatsAppMessagesResult:
+    ok: bool
+    provider: str
+    messages: List[WhatsAppMessage]
+    error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "provider": self.provider,
+            "messages": [m.to_dict() for m in self.messages],
+            "error": self.error,
+        }
 
 
 class WhatsAppCloudAPIClient:
@@ -239,3 +284,47 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
                 rate_limit_limit=rate.limit,
                 rate_limit_remaining=rate.remaining,
             ).to_dict()
+
+    @mcp.tool()
+    def get_ws_messages(
+        limit: int = 10,
+        since: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Fetch recent WhatsApp messages received via webhook.
+
+        Retrieves messages stored from incoming webhook events. Requires the
+        webhook server to be running and Meta webhook to be configured.
+
+        Args:
+            limit: Maximum number of messages to fetch (default 10).
+            since: Optional timestamp (ISO 8601) to fetch messages after.
+
+        Returns:
+            Dictionary with:
+                ok: boolean indicating success
+                messages: list of message objects with id, from, timestamp, type, body, etc.
+                count: number of messages returned
+
+        Note:
+            - Run webhook server: python -m tools.whatsapp_webhook
+            - Configure webhook URL in Meta Developer dashboard
+            - Messages stored locally in SQLite database
+        """
+        try:
+            from tools.whatsapp_webhook import get_message_store
+
+            store = get_message_store()
+            messages = store.get_recent(limit=limit, since=since)
+
+            return {
+                "ok": True,
+                "messages": [m.to_dict() for m in messages],
+                "count": len(messages),
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "messages": [],
+                "count": 0,
+                "error": str(e),
+            }
