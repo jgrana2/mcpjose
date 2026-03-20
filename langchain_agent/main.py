@@ -15,7 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run MCP Jose LangChain agent")
     parser.add_argument("prompt", nargs="?", help="Task prompt")
     parser.add_argument(
-        "--model", default="gpt-4o-mini", help="OpenAI model for LangChain"
+        "--model", default="gpt-5.4-mini", help="OpenAI model for LangChain"
     )
     parser.add_argument(
         "--temperature", type=float, default=0.0, help="Model temperature"

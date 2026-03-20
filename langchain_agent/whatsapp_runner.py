@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import time
 from dataclasses import dataclass, field
@@ -20,10 +21,13 @@ except Exception:  # pragma: no cover - dependency guard
     HumanMessage = None
 
 
+logger = logging.getLogger(__name__)
+
+
 def _load_env(repo_root: Path) -> None:
     env_file = repo_root / "auth" / ".env"
     if env_file.exists():
-        load_dotenv(env_file)
+        load_dotenv(env_file, override=True)
 
 
 def _normalize_number(value: str) -> str:
@@ -108,7 +112,16 @@ class WhatsAppAgentLoop:
             if not output:
                 output = "(no response)"
 
-            self.reply_sender(message.from_number, output)
+            try:
+                self.reply_sender(message.from_number, output)
+            except Exception as exc:
+                logger.error(
+                    "Failed to send WhatsApp reply to %s: %s",
+                    sender,
+                    exc,
+                )
+                continue
+
             self._append_turn(sender, body, output)
             handled += 1
 
@@ -142,7 +155,7 @@ def build_reply_sender() -> WhatsAppReplySender:
 
 def run_whatsapp_loop(
     *,
-    model: str = "gpt-4o-mini",
+    model: str = "gpt-5.4-mini",
     temperature: float = 0.0,
     max_iterations: int = 12,
     verbose: bool = False,
@@ -176,7 +189,7 @@ def run_whatsapp_loop(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the WhatsApp-only agent loop")
-    parser.add_argument("--model", default="gpt-4o-mini", help="OpenAI model")
+    parser.add_argument("--model", default="gpt-5.4-mini", help="OpenAI model")
     parser.add_argument(
         "--temperature", type=float, default=0.0, help="Model temperature"
     )

@@ -57,7 +57,7 @@ class MCPJoseLangChainAgent:
     def __init__(
         self,
         repo_root: Optional[Path] = None,
-        model: str = "gpt-4o-mini",
+        model: str = "gpt-5.4-mini",
         temperature: float = 0.0,
         max_iterations: int = 12,
         verbose: bool = False,

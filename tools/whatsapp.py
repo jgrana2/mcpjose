@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from mcp.server.fastmcp import FastMCP
+from requests import HTTPError
 from zoneinfo import ZoneInfo
 
 from core.http_client import HTTPClient
@@ -168,8 +169,41 @@ class WhatsAppCloudAPIClient:
                 "text": {"preview_url": False, "body": message},
             }
         url = f"https://graph.facebook.com/{self.api_version}/{self.phone_number_id}/messages"
-        resp = self.http.post(url, json=payload)
+        try:
+            resp = self.http.post(url, json=payload)
+        except HTTPError as exc:
+            raise RuntimeError(self._format_http_error(exc)) from exc
         return resp.json()
+
+    def _format_http_error(self, error: HTTPError) -> str:
+        response = error.response
+        if response is None:
+            return f"WhatsApp API request failed: {error}"
+
+        details = None
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+
+        if isinstance(payload, dict):
+            meta_error = payload.get("error")
+            if isinstance(meta_error, dict):
+                message = meta_error.get("message")
+                code = meta_error.get("code")
+                subcode = meta_error.get("error_subcode")
+                parts = [part for part in (message, f"code={code}" if code else None) if part]
+                if subcode:
+                    parts.append(f"subcode={subcode}")
+                details = "; ".join(parts)
+
+        if not details:
+            body = (response.text or "").strip()
+            details = body or str(error)
+
+        return (
+            f"WhatsApp API request failed with status {response.status_code}: {details}"
+        )
 
 
 def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
