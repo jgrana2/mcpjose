@@ -212,6 +212,26 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
         media_url: Optional[str] = None,
         mime_type: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """Send a WhatsApp message or image to a destination number.
+
+        For text messages, provide `destination` and `message`.
+        For image messages, additionally provide one of:
+          - `image_path` / `media_path`: local file path — the file is uploaded to
+            WhatsApp Cloud API and sent as an image; `message` becomes the caption.
+          - `media_url`: a public URL to an image — sent directly without uploading.
+        Do not provide both a local path and `media_url` at the same time.
+
+        Args:
+            destination: E.164-ish phone number (e.g. "+14155550123"). If not provided,
+                falls back to the WHATSAPP_DEFAULT_DESTINATION env var.
+            message: Text body (required). Used as the image caption for media messages.
+            template_name: Optional WhatsApp message template name.
+            language_code: Optional language code for template messages (default "en_US").
+            image_path: Local image file path to upload and send.
+            media_path: Alias for image_path; used when passing non-image media.
+            media_url: Public URL to an image to send without uploading.
+            mime_type: Optional MIME type override for local uploads.
+        """
         if destination:
             normalized = _normalize_e164ish(destination)
         else:

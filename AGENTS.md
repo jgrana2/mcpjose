@@ -260,6 +260,14 @@ Key packages (see `requirements.txt`):
 - `python-dotenv` - Environment management
 - `ddgs` - DuckDuckGo search
 
+## WhatsApp Image Size Limits
+
+When sending images via WhatsApp (`send_ws_msg` tool):
+- Large images (>5MB) will fail with error #100 (Invalid parameter)
+- AI-generated PNGs can be 5-10MB; resize before sending
+- Use ImageMagick: `magick image.png -resize 30% -quality 80 image.jpg`
+- See `.agents/skills/send-ws-msg/SKILL.md` for detailed optimization guidance
+
 ## Questions?
 
 When in doubt:

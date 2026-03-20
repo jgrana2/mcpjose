@@ -15,7 +15,13 @@ from core.rate_limit import DailyRateLimiter
 from core.utils import is_pdf_file
 from providers import ProviderFactory
 from providers.search import SearchFactory
-from tools.code_editor import _cmd_create, _cmd_insert, _cmd_str_replace, _cmd_undo, _cmd_view
+from tools.code_editor import (
+    _cmd_create,
+    _cmd_insert,
+    _cmd_str_replace,
+    _cmd_undo,
+    _cmd_view,
+)
 from tools.filesystem import FilesystemTools
 from tools.navigation import extract_html_content, extract_pdf_content
 from tools.whatsapp import WhatsAppCloudAPIClient, WhatsAppSendResult
@@ -361,8 +367,20 @@ class ProjectToolRegistry:
         message: str = "",
         template_name: Optional[str] = None,
         language_code: Optional[str] = None,
+        image_path: Optional[str] = None,
+        media_path: Optional[str] = None,
+        media_url: Optional[str] = None,
+        mime_type: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Send WhatsApp message using Meta Cloud API with local daily limit."""
+        """Send WhatsApp message or image using Meta Cloud API with local daily limit.
+
+        For text messages, provide `destination` and `message`.
+        For image messages, additionally provide one of:
+          - `image_path` / `media_path`: local file path — the file is uploaded to
+            WhatsApp Cloud API and sent as an image; `message` becomes the caption.
+          - `media_url`: a public URL to an image — sent directly without uploading.
+        Do not provide both a local path and `media_url` at the same time.
+        """
         default_destination = os.getenv("WHATSAPP_DEFAULT_DESTINATION")
         dest = destination or (default_destination or "").strip()
         if not dest:
@@ -407,13 +425,48 @@ class ProjectToolRegistry:
                 phone_number_id=os.getenv("WHATSAPP_PHONE_NUMBER_ID", ""),
                 api_version=os.getenv("WHATSAPP_API_VERSION", "v22.0"),
             )
-            result = client.send_text_message(
-                destination=normalized,
-                message=message.strip(),
-                template_name=template_name or os.getenv("WHATSAPP_TEMPLATE_NAME"),
-                language_code=language_code
-                or os.getenv("WHATSAPP_TEMPLATE_LANGUAGE", "en_US"),
+
+            effective_template = template_name or os.getenv("WHATSAPP_TEMPLATE_NAME")
+            effective_lang = language_code or os.getenv(
+                "WHATSAPP_TEMPLATE_LANGUAGE", "en_US"
             )
+            media_source = image_path or media_path
+
+            if media_source:
+                if media_url:
+                    return WhatsAppSendResult(
+                        ok=False,
+                        destination=normalized,
+                        provider=client.name,
+                        error="Provide either a local media path or media_url, not both.",
+                        rate_limit_day=rate.day,
+                        rate_limit_used=rate.used,
+                        rate_limit_limit=rate.limit,
+                        rate_limit_remaining=rate.remaining,
+                    ).to_dict()
+                media_id = client.upload_media(media_source, mime_type=mime_type)
+                result = client.send_image_message(
+                    normalized, media_id=media_id, caption=message.strip()
+                )
+            elif media_url:
+                # For media_url, construct the payload manually since send_image_message
+                # only accepts media_id
+                payload = {
+                    "messaging_product": "whatsapp",
+                    "to": _normalize_e164ish(normalized),
+                    "type": "image",
+                    "image": {"link": media_url, "caption": message.strip()},
+                }
+                url = f"https://graph.facebook.com/{client.api_version}/{client.phone_number_id}/messages"
+                result = client.http.post(url, json=payload).json()
+            else:
+                result = client.send_text_message(
+                    destination=normalized,
+                    message=message.strip(),
+                    template_name=effective_template,
+                    language_code=effective_lang,
+                )
+
             message_id = None
             if isinstance(result, dict):
                 messages = result.get("messages")
@@ -514,7 +567,9 @@ class ProjectToolRegistry:
             return _cmd_insert(resolved, insert_line, new_str, self._undo_stack)
         if command == "undo_edit":
             return _cmd_undo(resolved, self._undo_stack)
-        return {"error": f"Unknown command '{command}'. Use: view, create, str_replace, insert, undo_edit."}
+        return {
+            "error": f"Unknown command '{command}'. Use: view, create, str_replace, insert, undo_edit."
+        }
 
     def as_langchain_tools(self) -> list[BaseTool]:
         """Build LangChain StructuredTool objects for all project tools."""
