@@ -15,6 +15,7 @@ from core.rate_limit import DailyRateLimiter
 from core.utils import is_pdf_file
 from providers import ProviderFactory
 from providers.search import SearchFactory
+from tools.code_editor import _cmd_create, _cmd_insert, _cmd_str_replace, _cmd_undo, _cmd_view
 from tools.filesystem import FilesystemTools
 from tools.navigation import extract_html_content, extract_pdf_content
 from tools.whatsapp import WhatsAppCloudAPIClient, WhatsAppSendResult
@@ -50,6 +51,7 @@ class ProjectToolRegistry:
 
         self._skills_cache: Optional[Dict[str, SkillDocument]] = None
         self._ws_limiter: Optional[DailyRateLimiter] = None
+        self._undo_stack: Dict[str, list[str]] = {}
 
     # Context / Skills tools
     def read_agents_md(self, max_chars: int = 16000) -> Dict[str, Any]:
@@ -483,6 +485,37 @@ class ProjectToolRegistry:
         """List paths allowed by filesystem tools."""
         return self.fs_tools.list_allowed_directories()
 
+    def str_replace_editor(
+        self,
+        command: str,
+        path: str,
+        file_text: Optional[str] = None,
+        old_str: Optional[str] = None,
+        new_str: Optional[str] = None,
+        insert_line: Optional[int] = None,
+        view_range: Optional[list[int]] = None,
+    ) -> Dict[str, Any]:
+        """View, create, and edit files using the str_replace_editor pattern.
+
+        Commands: view, create, str_replace, insert, undo_edit.
+        """
+        try:
+            resolved = self.fs_tools._validate_path(path)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        if command == "view":
+            return _cmd_view(resolved, view_range)
+        if command == "create":
+            return _cmd_create(resolved, file_text, self._undo_stack)
+        if command == "str_replace":
+            return _cmd_str_replace(resolved, old_str, new_str, self._undo_stack)
+        if command == "insert":
+            return _cmd_insert(resolved, insert_line, new_str, self._undo_stack)
+        if command == "undo_edit":
+            return _cmd_undo(resolved, self._undo_stack)
+        return {"error": f"Unknown command '{command}'. Use: view, create, str_replace, insert, undo_edit."}
+
     def as_langchain_tools(self) -> list[BaseTool]:
         """Build LangChain StructuredTool objects for all project tools."""
         if StructuredTool is None:
@@ -556,6 +589,11 @@ class ProjectToolRegistry:
                 "list_allowed_directories",
                 "List directories allowed for filesystem access.",
                 self.list_allowed_directories,
+            ),
+            (
+                "str_replace_editor",
+                "View, create, and edit local files (commands: view, create, str_replace, insert, undo_edit).",
+                self.str_replace_editor,
             ),
             ("read_agents_md", "Read AGENTS.md instructions.", self.read_agents_md),
             ("list_skills", "List all discovered project skills.", self.list_skills),

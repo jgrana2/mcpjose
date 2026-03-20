@@ -28,6 +28,7 @@ from tools.navigation import init_tools as init_navigation_tools
 from tools.whatsapp import init_tools as init_whatsapp_tools
 from tools.wolfram_alpha import init_tools as init_wolfram_alpha_tools
 from tools.google_maps import init_tools as init_google_maps_tools
+from tools.code_editor import init_tools as init_code_editor_tools
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,9 @@ def create_server() -> FastMCP:
 
     # Initialize Google Maps tools
     init_google_maps_tools(mcp)
+
+    # Initialize code editor tools
+    init_code_editor_tools(mcp)
 
     # Initialize AI tools
     _init_ai_tools(mcp)
