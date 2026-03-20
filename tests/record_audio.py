@@ -3,7 +3,6 @@
 
 import sounddevice as sd
 import scipy.io.wavfile as wavfile
-import numpy as np
 import sys
 from pathlib import Path
 

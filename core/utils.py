@@ -1,7 +1,6 @@
 """Shared utility functions for file handling, image processing, and text manipulation."""
 
 import base64
-import io
 import os
 import re
 import tempfile

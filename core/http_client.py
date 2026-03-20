@@ -1,6 +1,6 @@
 """HTTP client wrapper with retry logic and error handling."""
 
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 import requests
 
 

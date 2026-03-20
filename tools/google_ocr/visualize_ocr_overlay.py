@@ -1,5 +1,4 @@
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 from matplotlib.patches import Rectangle
 from pdf2image import convert_from_path
 import re

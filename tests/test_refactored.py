@@ -1,22 +1,19 @@
 """Tests for refactored MCP server and providers."""
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.config import CredentialManager, get_config
+from core.config import get_config
 from core.utils import (
     detect_mime_type,
     is_pdf_file,
     format_search_result,
-    clean_text_whitespace,
     build_ocr_prompt,
 )
 from providers.search import SearchFactory, DuckDuckGoProvider
-from providers import ProviderFactory
 from mcp_server.server import create_server
 
 

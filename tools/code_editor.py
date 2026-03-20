@@ -4,7 +4,6 @@ Single tool with commands: view, create, str_replace, insert, undo_edit.
 Based on: https://www.anthropic.com/engineering/swe-bench-sonnet
 """
 
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 

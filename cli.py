@@ -11,13 +11,13 @@ env_file = Path(__file__).resolve().parent / "auth" / ".env"
 if env_file.exists():
     load_dotenv(env_file)
 
-import argparse
+import argparse  # noqa: E402
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.utils import load_text_file
-from providers import ProviderFactory
+from core.utils import load_text_file  # noqa: E402
+from providers import ProviderFactory  # noqa: E402
 
 
 def call_llm_main():

@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any, Dict
 from twscrape import API
 from dotenv import load_dotenv
-import time
 
 # Load environment variables from auth/.env at project root
 env_file = Path(__file__).parent.parent / "auth" / ".env"
@@ -49,7 +48,7 @@ async def x_search(
     try:
         print(f"Searching for tweets about: {topic}")
         print(f"Search query: {topic} filter:links")
-        print(f"Limit: 20 tweets")
+        print("Limit: 20 tweets")
         print(f"Wait for rate limit: {wait_for_rate_limit}")
         print()
         
@@ -94,7 +93,7 @@ async def main():
     # Test with a simple topic  
     topic = "AI programming"
     
-    print(f"Test Parameters:")
+    print("Test Parameters:")
     print(f"  Topic: {topic}")
     print()
     

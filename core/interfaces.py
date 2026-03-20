@@ -7,7 +7,7 @@ Implements SOLID principles:
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Protocol, Tuple, Union
+from typing import Any, Dict, List, Optional, Protocol, Union
 from pathlib import Path
 
 

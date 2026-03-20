@@ -19,14 +19,12 @@ from core.interfaces import (
     OCRProvider,
     VisionProvider,
 )
-from core import utils
 from core.utils import (
     build_ocr_prompt,
     cleanup_temp_file,
     encode_image_to_data_url,
     extract_bounding_box,
     load_image_for_processing,
-    load_text_file,
     detect_mime_type,
 )
 
@@ -118,16 +116,25 @@ class GeminiVisionProvider(VisionProvider):
             creds["credentials_path"]
         )
         # Vertex AI multimodal models require a regional location ("global" is unsupported).
-        region = os.getenv("VERTEX_AI_REGION") or os.getenv("GOOGLE_CLOUD_REGION") or "us-central1"
+        region = (
+            os.getenv("VERTEX_AI_REGION")
+            or os.getenv("GOOGLE_CLOUD_REGION")
+            or "us-central1"
+        )
         try:
             vertexai.init(
                 project=creds["project_id"], location=region, credentials=credentials
             )
         except ValueError as exc:
-            if "Unsupported region for Vertex AI" not in str(exc) or region == "us-central1":
+            if (
+                "Unsupported region for Vertex AI" not in str(exc)
+                or region == "us-central1"
+            ):
                 raise
             vertexai.init(
-                project=creds["project_id"], location="us-central1", credentials=credentials
+                project=creds["project_id"],
+                location="us-central1",
+                credentials=credentials,
             )
 
     @property

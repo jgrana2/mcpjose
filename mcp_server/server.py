@@ -19,17 +19,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Add scrape_play directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scrape_play"))
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 # Import providers
-from providers import ProviderFactory
-from providers.search import SearchFactory
-from tools.image_and_whatsapp import init_tools as init_image_and_whatsapp_tools
-from tools.navigation import init_tools as init_navigation_tools
-from tools.whatsapp import init_tools as init_whatsapp_tools
-from tools.wolfram_alpha import init_tools as init_wolfram_alpha_tools
-from tools.google_maps import init_tools as init_google_maps_tools
-from tools.code_editor import init_tools as init_code_editor_tools
+from providers import ProviderFactory  # noqa: E402
+from providers.search import SearchFactory  # noqa: E402
+from tools.navigation import init_tools as init_navigation_tools  # noqa: E402
+from tools.whatsapp import init_tools as init_whatsapp_tools  # noqa: E402
+from tools.wolfram_alpha import init_tools as init_wolfram_alpha_tools  # noqa: E402
+from tools.google_maps import init_tools as init_google_maps_tools  # noqa: E402
+from tools.code_editor import init_tools as init_code_editor_tools  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +45,6 @@ def create_server() -> FastMCP:
     init_navigation_tools(mcp)
 
     # Initialize WhatsApp tools
-    # Initialize combined image/WhatsApp tools
-    init_image_and_whatsapp_tools(mcp)
     init_whatsapp_tools(mcp)
 
     # Initialize search tools

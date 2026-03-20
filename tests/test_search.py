@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from providers.search import SearchFactory, DuckDuckGoProvider, GooglePSEProvider
+from providers.search import SearchFactory
 
 
 def test_search():

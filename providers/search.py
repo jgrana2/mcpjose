@@ -1,8 +1,7 @@
 """Search providers with unified interface."""
 
-import os
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from core.config import get_config
 from core.utils import format_search_result
