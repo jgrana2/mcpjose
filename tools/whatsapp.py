@@ -8,19 +8,20 @@ Notes:
 
 from __future__ import annotations
 
+import mimetypes
 import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 from mcp.server.fastmcp import FastMCP
 from requests import HTTPError
 from zoneinfo import ZoneInfo
 
+from core.config import get_config
 from core.http_client import HTTPClient
 from core.rate_limit import DailyRateLimiter
-from core.config import get_config
 
 
 def _parse_csv_set(value: Optional[str]) -> Set[str]:
@@ -30,11 +31,6 @@ def _parse_csv_set(value: Optional[str]) -> Set[str]:
 
 
 def _normalize_e164ish(number: str) -> str:
-    """Best-effort normalization.
-
-    WhatsApp Cloud API expects phone numbers in international format digits,
-    typically without '+'.
-    """
     stripped = number.strip()
     if stripped.startswith("+"):
         stripped = stripped[1:]
@@ -74,54 +70,7 @@ class WhatsAppSendResult:
         return data
 
 
-@dataclass(frozen=True)
-class WhatsAppMessage:
-    id: str
-    from_number: str
-    timestamp: str
-    type: str
-    body: Optional[str] = None
-    caption: Optional[str] = None
-    media_id: Optional[str] = None
-    media_type: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        data: Dict[str, Any] = {
-            "id": self.id,
-            "from": self.from_number,
-            "timestamp": self.timestamp,
-            "type": self.type,
-        }
-        if self.body:
-            data["body"] = self.body
-        if self.caption:
-            data["caption"] = self.caption
-        if self.media_id:
-            data["media_id"] = self.media_id
-        if self.media_type:
-            data["media_type"] = self.media_type
-        return data
-
-
-@dataclass(frozen=True)
-class WhatsAppMessagesResult:
-    ok: bool
-    provider: str
-    messages: List[WhatsAppMessage]
-    error: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "ok": self.ok,
-            "provider": self.provider,
-            "messages": [m.to_dict() for m in self.messages],
-            "error": self.error,
-        }
-
-
 class WhatsAppCloudAPIClient:
-    """Minimal client for Meta WhatsApp Cloud API."""
-
     def __init__(
         self,
         access_token: str,
@@ -175,17 +124,58 @@ class WhatsAppCloudAPIClient:
             raise RuntimeError(self._format_http_error(exc)) from exc
         return resp.json()
 
+    def upload_media(self, file_path: str, mime_type: Optional[str] = None) -> str:
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+        if not mime_type:
+            mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        url = f"https://graph.facebook.com/{self.api_version}/{self.phone_number_id}/media"
+        with path.open("rb") as fh:
+            files = {"file": (path.name, fh, mime_type)}
+            data = {"messaging_product": "whatsapp", "type": mime_type}
+            try:
+                resp = self.http.post(url, data=data, files=files)
+            except HTTPError as exc:
+                raise RuntimeError(self._format_http_error(exc)) from exc
+        payload = resp.json()
+        media_id = payload.get("id") if isinstance(payload, dict) else None
+        if not media_id:
+            raise RuntimeError("WhatsApp media upload did not return an id")
+        return media_id
+
+    def send_image_message(
+        self,
+        destination: str,
+        media_id: str,
+        caption: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        to = _normalize_e164ish(destination)
+        image_block: Dict[str, Any] = {"id": media_id}
+        if caption:
+            image_block["caption"] = caption
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "image",
+            "image": image_block,
+        }
+        url = f"https://graph.facebook.com/{self.api_version}/{self.phone_number_id}/messages"
+        try:
+            resp = self.http.post(url, json=payload)
+        except HTTPError as exc:
+            raise RuntimeError(self._format_http_error(exc)) from exc
+        return resp.json()
+
     def _format_http_error(self, error: HTTPError) -> str:
         response = error.response
         if response is None:
             return f"WhatsApp API request failed: {error}"
-
         details = None
         try:
             payload = response.json()
         except ValueError:
             payload = None
-
         if isinstance(payload, dict):
             meta_error = payload.get("error")
             if isinstance(meta_error, dict):
@@ -196,26 +186,16 @@ class WhatsAppCloudAPIClient:
                 if subcode:
                     parts.append(f"subcode={subcode}")
                 details = "; ".join(parts)
-
         if not details:
             body = (response.text or "").strip()
             details = body or str(error)
-
-        return (
-            f"WhatsApp API request failed with status {response.status_code}: {details}"
-        )
+        return f"WhatsApp API request failed with status {response.status_code}: {details}"
 
 
 def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
-    """Register WhatsApp tools."""
-
     base_http = http_client or HTTPClient()
-
     repo_root = get_config().repo_root
-    limiter = DailyRateLimiter.from_env(
-        default_path=Path(repo_root) / "auth" / "rate_limits.sqlite"
-    )
-
+    limiter = DailyRateLimiter.from_env(default_path=Path(repo_root) / "auth" / "rate_limits.sqlite")
     daily_max = int(os.getenv("WHATSAPP_DAILY_MAX", "10"))
     default_destination = os.getenv("WHATSAPP_DEFAULT_DESTINATION")
     tz_name = os.getenv("WHATSAPP_TIMEZONE")
@@ -227,24 +207,14 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
         message: str,
         template_name: Optional[str] = None,
         language_code: Optional[str] = None,
+        image_path: Optional[str] = None,
+        media_path: Optional[str] = None,
+        media_url: Optional[str] = None,
+        mime_type: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Send a WhatsApp message (text or template) using Meta WhatsApp Cloud API.
-
-        Inputs:
-            destination: Destination phone number (E.164-ish). If omitted, uses WHATSAPP_DEFAULT_DESTINATION.
-            message: Text message body (used for text messages or as fallback).
-            template_name: Optional template name for sending template messages (required for new conversations outside 24h window).
-            language_code: Optional language code for templates (e.g., 'en_US', defaults to 'en_US').
-
-        Outputs:
-            ok: boolean, plus provider info and (if available) message_id.
-        """
-        # Determine destination to use
         if destination:
-            # Use the destination provided by the user
             normalized = _normalize_e164ish(destination)
         else:
-            # Use default destination if none provided
             dest = (default_destination or "").strip()
             if not dest:
                 return WhatsAppSendResult(
@@ -254,7 +224,6 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
                     error="Missing destination. Provide a destination or set WHATSAPP_DEFAULT_DESTINATION.",
                 ).to_dict()
             normalized = _normalize_e164ish(dest)
-
         if not message or not message.strip():
             return WhatsAppSendResult(
                 ok=False,
@@ -262,7 +231,6 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
                 provider="whatsapp_cloud_api",
                 error="Message must be a non-empty string.",
             ).to_dict()
-
         rate = limiter.consume(scope="send_ws_msg", limit=daily_max, amount=1, tz=tz)
         if not rate.allowed:
             return WhatsAppSendResult(
@@ -275,7 +243,6 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
                 rate_limit_limit=rate.limit,
                 rate_limit_remaining=rate.remaining,
             ).to_dict()
-
         try:
             api = WhatsAppCloudAPIClient(
                 access_token=os.getenv("WHATSAPP_ACCESS_TOKEN", ""),
@@ -283,20 +250,39 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
                 api_version=os.getenv("WHATSAPP_API_VERSION", "v22.0"),
                 http_client=base_http,
             )
-            # Use provided template_name, fall back to env var, or None for text messages
             effective_template = template_name or os.getenv("WHATSAPP_TEMPLATE_NAME")
-            effective_lang = language_code or os.getenv(
-                "WHATSAPP_TEMPLATE_LANGUAGE", "en_US"
-            )
-            result = api.send_text_message(
-                normalized, message.strip(), effective_template, effective_lang
-            )
+            effective_lang = language_code or os.getenv("WHATSAPP_TEMPLATE_LANGUAGE", "en_US")
+            media_source = image_path or media_path
+            if media_source:
+                if media_url:
+                    return WhatsAppSendResult(
+                        ok=False,
+                        destination=normalized,
+                        provider=api.name,
+                        error="Provide either a local media path or media_url, not both.",
+                        rate_limit_day=rate.day,
+                        rate_limit_used=rate.used,
+                        rate_limit_limit=rate.limit,
+                        rate_limit_remaining=rate.remaining,
+                    ).to_dict()
+                media_id = api.upload_media(media_source, mime_type=mime_type)
+                result = api.send_image_message(normalized, media_id=media_id, caption=message.strip())
+            elif media_url:
+                payload = {
+                    "messaging_product": "whatsapp",
+                    "to": normalized,
+                    "type": "image",
+                    "image": {"link": media_url, "caption": message.strip()},
+                }
+                url = f"https://graph.facebook.com/{api.api_version}/{api.phone_number_id}/messages"
+                result = base_http.post(url, json=payload).json()
+            else:
+                result = api.send_text_message(normalized, message.strip(), effective_template, effective_lang)
             message_id = None
             if isinstance(result, dict):
                 messages = result.get("messages")
                 if isinstance(messages, list) and messages:
                     message_id = messages[0].get("id")
-
             return WhatsAppSendResult(
                 ok=True,
                 destination=normalized,
@@ -320,45 +306,11 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
             ).to_dict()
 
     @mcp.tool()
-    def get_ws_messages(
-        limit: int = 10,
-        since: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Fetch recent WhatsApp messages received via webhook.
-
-        Retrieves messages stored from incoming webhook events. Requires the
-        webhook server to be running and Meta webhook to be configured.
-
-        Args:
-            limit: Maximum number of messages to fetch (default 10).
-            since: Optional timestamp (ISO 8601) to fetch messages after.
-
-        Returns:
-            Dictionary with:
-                ok: boolean indicating success
-                messages: list of message objects with id, from, timestamp, type, body, etc.
-                count: number of messages returned
-
-        Note:
-            - Run webhook server: python -m tools.whatsapp_webhook
-            - Configure webhook URL in Meta Developer dashboard
-            - Messages stored locally in SQLite database
-        """
+    def get_ws_messages(limit: int = 10, since: Optional[str] = None) -> Dict[str, Any]:
         try:
             from tools.whatsapp_webhook import get_message_store
-
             store = get_message_store()
             messages = store.get_recent(limit=limit, since=since)
-
-            return {
-                "ok": True,
-                "messages": [m.to_dict() for m in messages],
-                "count": len(messages),
-            }
+            return {"ok": True, "messages": [m.to_dict() for m in messages], "count": len(messages)}
         except Exception as e:
-            return {
-                "ok": False,
-                "messages": [],
-                "count": 0,
-                "error": str(e),
-            }
+            return {"ok": False, "messages": [], "count": 0, "error": str(e)}

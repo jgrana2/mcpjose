@@ -24,6 +24,7 @@ from mcp.server.fastmcp import FastMCP
 # Import providers
 from providers import ProviderFactory
 from providers.search import SearchFactory
+from tools.image_and_whatsapp import init_tools as init_image_and_whatsapp_tools
 from tools.navigation import init_tools as init_navigation_tools
 from tools.whatsapp import init_tools as init_whatsapp_tools
 from tools.wolfram_alpha import init_tools as init_wolfram_alpha_tools
@@ -45,6 +46,8 @@ def create_server() -> FastMCP:
     init_navigation_tools(mcp)
 
     # Initialize WhatsApp tools
+    # Initialize combined image/WhatsApp tools
+    init_image_and_whatsapp_tools(mcp)
     init_whatsapp_tools(mcp)
 
     # Initialize search tools

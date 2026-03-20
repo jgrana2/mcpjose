@@ -11,9 +11,12 @@ from langchain_agent.whatsapp_runner import WhatsAppAgentLoop
 class _Message:
     id: str
     from_number: str
-    body: str
-    received_at: str
+    body: str = ""
+    received_at: str = ""
     timestamp: str = ""
+    type: str = "text"
+    caption: str = ""
+    media_id: str | None = None
 
 
 class _Store:
@@ -32,6 +35,9 @@ class _Agent:
         history = list(chat_history or [])
         self.calls.append((user_input, history))
         return f"reply: {user_input}"
+
+    def invoke(self, user_input: str, chat_history=None):
+        return {"output": f"vision: {user_input}"}
 
 
 class _Sender:
@@ -52,12 +58,18 @@ class _FailingSender:
         raise RuntimeError("token expired")
 
 
+class _Fetcher:
+    def __init__(self, path: str = "/tmp/example.jpg") -> None:
+        self.calls: list[str] = []
+        self.path = path
+
+    def fetch_image(self, media_id: str):
+        self.calls.append(media_id)
+        return self.path
+
+
 def test_poll_once_routes_new_messages_through_agent_and_reply_sender() -> None:
-    store = _Store(
-        [
-            _Message("seed", "573002612420", "seed", "2026-03-19T19:00:00"),
-        ]
-    )
+    store = _Store([_Message("seed", "573002612420", "seed", "2026-03-19T19:00:00")])
     agent = _Agent()
     sender = _Sender()
 
@@ -82,18 +94,11 @@ def test_poll_once_routes_new_messages_through_agent_and_reply_sender() -> None:
     assert [call[0] for call in agent.calls] == ["First prompt", "Second prompt"]
     assert len(agent.calls[0][1]) == 0
     assert len(agent.calls[1][1]) == 2
-    assert sender.sent == [
-        ("573002612420", "reply: First prompt"),
-        ("573002612420", "reply: Second prompt"),
-    ]
+    assert sender.sent == [("573002612420", "reply: First prompt"), ("573002612420", "reply: Second prompt")]
 
 
 def test_poll_once_continues_when_reply_sender_fails(caplog) -> None:
-    store = _Store(
-        [
-            _Message("seed", "573002612420", "seed", "2026-03-19T19:00:00"),
-        ]
-    )
+    store = _Store([_Message("seed", "573002612420", "seed", "2026-03-19T19:00:00")])
     agent = _Agent()
     sender = _FailingSender()
 
@@ -116,8 +121,41 @@ def test_poll_once_continues_when_reply_sender_fails(caplog) -> None:
 
     assert handled == 0
     assert [call[0] for call in agent.calls] == ["First prompt", "Second prompt"]
-    assert sender.calls == [
-        ("573002612420", "reply: First prompt"),
-        ("573002612420", "reply: Second prompt"),
-    ]
+    assert sender.calls == [("573002612420", "reply: First prompt"), ("573002612420", "reply: Second prompt")]
     assert "Failed to send WhatsApp reply" in caplog.text
+
+
+def test_poll_once_auto_analyzes_image_messages_with_fetcher() -> None:
+    store = _Store([_Message("seed", "573002612420", "seed", "2026-03-19T19:00:00")])
+    agent = _Agent()
+    sender = _Sender()
+    fetcher = _Fetcher("/tmp/whatsapp_media.jpg")
+
+    loop = WhatsAppAgentLoop(
+        agent=agent,
+        store=store,
+        reply_sender=sender.send,
+        media_fetcher=fetcher,
+        allowed_sender="573002612420",
+        scan_limit=10,
+    )
+
+    store.messages.append(
+        _Message(
+            "img1",
+            "573002612420",
+            "",
+            "2026-03-19T19:03:00",
+            type="image",
+            caption="Check this out",
+            media_id="media-123",
+        )
+    )
+
+    handled = loop.poll_once()
+
+    assert handled == 1
+    assert fetcher.calls == ["media-123"]
+    assert "Image analysis result for WhatsApp media media-123" in agent.calls[0][0]
+    assert "Sender caption: Check this out" in agent.calls[0][0]
+    assert sender.sent == [("573002612420", "reply: " + agent.calls[0][0])]

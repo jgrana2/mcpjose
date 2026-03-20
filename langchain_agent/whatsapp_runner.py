@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -57,12 +58,36 @@ class WhatsAppReplySender:
 
 
 @dataclass
+class WhatsAppMediaFetcher:
+    access_token: str
+    api_version: str = "v22.0"
+
+    def fetch_image(self, media_id: str, output_dir: Optional[Path] = None) -> Path:
+        from core.http_client import HTTPClient
+
+        http = HTTPClient()
+        http.session.headers.update({"Authorization": f"Bearer {self.access_token}"})
+        meta = http.get(f"https://graph.facebook.com/{self.api_version}/{media_id}").json()
+        url = meta.get("url")
+        if not url:
+            raise RuntimeError("WhatsApp media URL not found")
+        resp = http.get(url)
+        out_dir = output_dir or Path(tempfile.gettempdir())
+        out_dir.mkdir(parents=True, exist_ok=True)
+        filename = meta.get("mime_type", "image/jpeg").replace("/", "_")
+        path = out_dir / f"whatsapp_{media_id}_{filename}"
+        path.write_bytes(resp.content)
+        return path
+
+
+@dataclass
 class WhatsAppAgentLoop:
     """Poll inbound WhatsApp messages and answer them with the LangChain agent."""
 
     agent: MCPJoseLangChainAgent
     store: Any
     reply_sender: Callable[[str, str], Dict[str, Any]]
+    media_fetcher: Optional[WhatsAppMediaFetcher] = None
     allowed_sender: Optional[str] = None
     poll_seconds: int = 3
     history_turn_limit: int = 12
@@ -79,7 +104,6 @@ class WhatsAppAgentLoop:
             }
 
     def poll_once(self) -> int:
-        """Process any new messages and return the count handled."""
         messages = self.store.get_recent(limit=self.scan_limit)
         fresh = [message for message in messages if message.id not in self.seen_ids]
         fresh.sort(
@@ -94,18 +118,18 @@ class WhatsAppAgentLoop:
         for message in fresh:
             self.seen_ids.add(message.id)
 
-            body = (message.body or "").strip()
-            if not body:
-                continue
-
             sender = _normalize_number(message.from_number)
             if self.allowed_sender and sender != self.allowed_sender:
+                continue
+
+            prompt = self._build_prompt(message)
+            if not prompt:
                 continue
 
             history = self.history_by_sender.get(sender, [])
 
             try:
-                output = self.agent.run(body, chat_history=history).strip()
+                output = self.agent.run(prompt, chat_history=history).strip()
             except Exception as exc:
                 output = f"Agent error: {exc}"
 
@@ -122,13 +146,78 @@ class WhatsAppAgentLoop:
                 )
                 continue
 
-            self._append_turn(sender, body, output)
+            self._append_turn(sender, prompt, output)
             handled += 1
 
         return handled
 
+    def _build_prompt(self, message: Any) -> str:
+        body = (getattr(message, "body", "") or "").strip()
+        caption = (getattr(message, "caption", "") or "").strip()
+        msg_type = getattr(message, "type", "")
+        media_id = getattr(message, "media_id", None)
+
+        if msg_type == "image" and media_id:
+            analysis = self._analyze_image(media_id=media_id, caption=caption)
+            if analysis:
+                return analysis
+            return caption or "Analyze this image."
+
+        return body or caption
+
+    def _analyze_image(self, media_id: str, caption: str = "") -> str:
+        if not self.media_fetcher:
+            return ""
+
+        try:
+            image_path = self.media_fetcher.fetch_image(media_id)
+        except Exception as exc:
+            logger.error("Failed to fetch WhatsApp image %s: %s", media_id, exc)
+            return ""
+
+        prompt = (
+            "Analyze this WhatsApp image and explain what is visible. "
+            "If there is text, extract it. If there are notable objects, people, or scenes, describe them. "
+            "Keep the response concise but useful."
+        )
+
+        result = self._run_vision_pipeline(image_path=image_path, prompt=prompt)
+        if not result:
+            return ""
+
+        header = f"Image analysis result for WhatsApp media {media_id}:\n{result}"
+        if caption:
+            return f"{header}\n\nSender caption: {caption}"
+        return header
+
+    def _run_vision_pipeline(self, image_path: Path, prompt: str) -> str:
+        vision_prompts = [
+            "Use OpenAI vision to analyze the image at {path}. {prompt}",
+            "Use Gemini vision to analyze the image at {path}. {prompt}",
+        ]
+        for template in vision_prompts:
+            result = self._call_vision_prompt(template, image_path, prompt)
+            if result:
+                return result
+        return ""
+
+    def _call_vision_prompt(self, template: str, image_path: Path, prompt: str) -> str:
+        try:
+            result = self.agent.invoke(
+                template.format(path=image_path, prompt=prompt),
+                chat_history=[],
+            )
+        except Exception as exc:
+            logger.error("Vision analysis failed for %s: %s", image_path, exc)
+            return ""
+
+        if isinstance(result, dict):
+            output = result.get("output")
+            if isinstance(output, str) and output.strip():
+                return output.strip()
+        return str(result).strip()
+
     def run_forever(self) -> None:
-        """Keep polling until interrupted."""
         while True:
             self.poll_once()
             time.sleep(self.poll_seconds)
@@ -149,6 +238,16 @@ def build_reply_sender() -> WhatsAppReplySender:
     return WhatsAppReplySender(
         access_token=os.getenv("WHATSAPP_ACCESS_TOKEN", ""),
         phone_number_id=os.getenv("WHATSAPP_PHONE_NUMBER_ID", ""),
+        api_version=os.getenv("WHATSAPP_API_VERSION", "v22.0"),
+    )
+
+
+def build_media_fetcher() -> Optional[WhatsAppMediaFetcher]:
+    token = os.getenv("WHATSAPP_ACCESS_TOKEN", "")
+    if not token:
+        return None
+    return WhatsAppMediaFetcher(
+        access_token=token,
         api_version=os.getenv("WHATSAPP_API_VERSION", "v22.0"),
     )
 
@@ -181,6 +280,7 @@ def run_whatsapp_loop(
         agent=agent,
         store=store,
         reply_sender=reply_sender.send,
+        media_fetcher=build_media_fetcher(),
         allowed_sender=allowed_sender or os.getenv("WHATSAPP_DEFAULT_DESTINATION"),
         poll_seconds=poll_seconds,
     )

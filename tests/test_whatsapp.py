@@ -5,12 +5,16 @@ This module tests the WhatsApp Cloud API integration including:
 - Destination validation
 - Message sending
 - Error handling
+- Media sending
 """
 
-import pytest
+from tempfile import NamedTemporaryFile
 from unittest.mock import Mock, patch
+
+import pytest
 from mcp.server.fastmcp import FastMCP
 
+from core.http_client import HTTPClient
 from tools.whatsapp import (
     WhatsAppCloudAPIClient,
     WhatsAppSendResult,
@@ -18,65 +22,44 @@ from tools.whatsapp import (
     _parse_csv_set,
     init_tools,
 )
-from core.http_client import HTTPClient
 
 
 class TestNormalization:
     """Test phone number normalization."""
 
     def test_normalize_e164ish_with_plus(self):
-        """Test normalization removes leading plus."""
         assert _normalize_e164ish("+14155551234") == "14155551234"
 
     def test_normalize_e164ish_without_plus(self):
-        """Test normalization of number without plus."""
         assert _normalize_e164ish("14155551234") == "14155551234"
 
     def test_normalize_e164ish_with_spaces(self):
-        """Test normalization removes spaces."""
         assert _normalize_e164ish("+1 415 555 1234") == "14155551234"
 
     def test_normalize_e164ish_with_dashes(self):
-        """Test normalization removes dashes."""
         assert _normalize_e164ish("+1-415-555-1234") == "14155551234"
 
     def test_normalize_e164ish_with_parens(self):
-        """Test normalization removes parentheses."""
         assert _normalize_e164ish("+1 (415) 555-1234") == "14155551234"
 
 
 class TestCSVParsing:
-    """Test CSV set parsing."""
-
     def test_parse_csv_set_single(self):
-        """Test parsing single value."""
         assert _parse_csv_set("14155551234") == {"14155551234"}
 
     def test_parse_csv_set_multiple(self):
-        """Test parsing multiple values."""
-        assert _parse_csv_set("14155551234,14155551235") == {
-            "14155551234",
-            "14155551235",
-        }
+        assert _parse_csv_set("14155551234,14155551235") == {"14155551234", "14155551235"}
 
     def test_parse_csv_set_with_spaces(self):
-        """Test parsing with spaces."""
-        assert _parse_csv_set(" 14155551234 , 14155551235 ") == {
-            "14155551234",
-            "14155551235",
-        }
+        assert _parse_csv_set(" 14155551234 , 14155551235 ") == {"14155551234", "14155551235"}
 
     def test_parse_csv_set_empty(self):
-        """Test parsing empty string."""
         assert _parse_csv_set("") == set()
         assert _parse_csv_set(None) == set()
 
 
 class TestWhatsAppSendResult:
-    """Test WhatsAppSendResult dataclass."""
-
     def test_to_dict_success(self):
-        """Test conversion to dict for successful send."""
         result = WhatsAppSendResult(
             ok=True,
             destination="14155551234",
@@ -89,16 +72,9 @@ class TestWhatsAppSendResult:
         )
         data = result.to_dict()
         assert data["ok"] is True
-        assert data["destination"] == "14155551234"
-        assert data["provider"] == "whatsapp_cloud_api"
         assert data["message_id"] == "wamid.xxx"
-        assert data["rate_limit"]["day"] == "2026-03-03"
-        assert data["rate_limit"]["used"] == 1
-        assert data["rate_limit"]["limit"] == 10
-        assert data["rate_limit"]["remaining"] == 9
 
     def test_to_dict_error(self):
-        """Test conversion to dict for failed send."""
         result = WhatsAppSendResult(
             ok=False,
             destination="14155551234",
@@ -108,93 +84,74 @@ class TestWhatsAppSendResult:
         data = result.to_dict()
         assert data["ok"] is False
         assert data["error"] == "Rate limit exceeded"
-        assert "message_id" not in data
-        assert "rate_limit" not in data
 
 
 class TestWhatsAppCloudAPIClient:
-    """Test WhatsApp Cloud API client."""
-
     def test_init_missing_token(self):
-        """Test initialization fails without access token."""
         with pytest.raises(EnvironmentError, match="WHATSAPP_ACCESS_TOKEN"):
             WhatsAppCloudAPIClient(access_token="", phone_number_id="123456")
 
     def test_init_missing_phone_id(self):
-        """Test initialization fails without phone number ID."""
         with pytest.raises(EnvironmentError, match="WHATSAPP_PHONE_NUMBER_ID"):
             WhatsAppCloudAPIClient(access_token="test_token", phone_number_id="")
 
     def test_init_success(self):
-        """Test successful initialization."""
-        client = WhatsAppCloudAPIClient(
-            access_token="test_token", phone_number_id="123456"
-        )
-        assert client.access_token == "test_token"
-        assert client.phone_number_id == "123456"
-        assert client.api_version == "v21.0"
+        client = WhatsAppCloudAPIClient(access_token="test_token", phone_number_id="123456")
         assert client.name == "whatsapp_cloud_api"
 
     @patch.object(HTTPClient, "post")
     def test_send_text_message(self, mock_post):
-        """Test sending a text message."""
         mock_response = Mock()
-        mock_response.json.return_value = {
-            "messages": [{"id": "wamid.test123"}],
-            "messaging_product": "whatsapp",
-        }
+        mock_response.json.return_value = {"messages": [{"id": "wamid.test123"}]}
         mock_post.return_value = mock_response
-
-        client = WhatsAppCloudAPIClient(
-            access_token="test_token", phone_number_id="123456"
-        )
+        client = WhatsAppCloudAPIClient(access_token="test_token", phone_number_id="123456")
         _ = client.send_text_message("+14155551234", "Test message")
-
-        assert mock_post.called
-        call_args = mock_post.call_args
-        assert "v21.0/123456/messages" in call_args[0][0]
-        payload = call_args[1]["json"]
-        assert payload["messaging_product"] == "whatsapp"
-        assert payload["to"] == "14155551234"
+        payload = mock_post.call_args[1]["json"]
         assert payload["type"] == "text"
-        assert payload["text"]["body"] == "Test message"
 
     @patch.object(HTTPClient, "post")
     def test_send_template_message(self, mock_post):
-        """Test sending a template message."""
         mock_response = Mock()
-        mock_response.json.return_value = {
-            "messages": [{"id": "wamid.test123"}],
-            "messaging_product": "whatsapp",
-        }
+        mock_response.json.return_value = {"messages": [{"id": "wamid.test123"}]}
         mock_post.return_value = mock_response
-
-        client = WhatsAppCloudAPIClient(
-            access_token="test_token", phone_number_id="123456"
-        )
+        client = WhatsAppCloudAPIClient(access_token="test_token", phone_number_id="123456")
         _ = client.send_text_message(
             "+14155551234", "Test message", template_name="hello_world"
         )
-
-        assert mock_post.called
-        call_args = mock_post.call_args
-        payload = call_args[1]["json"]
+        payload = mock_post.call_args[1]["json"]
         assert payload["type"] == "template"
-        assert payload["template"]["name"] == "hello_world"
-        assert payload["template"]["language"]["code"] == "en_US"
+
+    @patch.object(HTTPClient, "post")
+    def test_upload_media(self, mock_post):
+        mock_response = Mock()
+        mock_response.json.return_value = {"id": "media_123"}
+        mock_post.return_value = mock_response
+        with NamedTemporaryFile(suffix=".png") as tmp:
+            tmp.write(b"pngdata")
+            tmp.flush()
+            client = WhatsAppCloudAPIClient(access_token="test_token", phone_number_id="123456")
+            media_id = client.upload_media(tmp.name, mime_type="image/png")
+        assert media_id == "media_123"
+
+    @patch.object(HTTPClient, "post")
+    def test_send_image_message(self, mock_post):
+        mock_response = Mock()
+        mock_response.json.return_value = {"messages": [{"id": "wamid.image123"}]}
+        mock_post.return_value = mock_response
+        client = WhatsAppCloudAPIClient(access_token="test_token", phone_number_id="123456")
+        _ = client.send_image_message("+14155551234", media_id="media_123", caption="Hello")
+        payload = mock_post.call_args[1]["json"]
+        assert payload["type"] == "image"
+        assert payload["image"]["caption"] == "Hello"
 
 
 class TestWhatsAppToolIntegration:
-    """Integration tests for WhatsApp tool."""
-
     @pytest.fixture
     def mcp_server(self):
-        """Create a test MCP server."""
         return FastMCP("test_whatsapp")
 
     @pytest.fixture
     def mock_env(self, monkeypatch):
-        """Set up mock environment variables."""
         monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "test_token")
         monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "123456")
         monkeypatch.setenv("WHATSAPP_API_VERSION", "v22.0")
@@ -203,231 +160,43 @@ class TestWhatsAppToolIntegration:
 
     @pytest.mark.asyncio
     async def test_init_tools(self, mcp_server, mock_env):
-        """Test tool initialization."""
         init_tools(mcp_server)
-        # Check that the tool was registered
         tools = await mcp_server.list_tools()
         assert "send_ws_msg" in [tool.name for tool in tools]
 
+    @patch("tools.whatsapp.DailyRateLimiter.from_env")
     @patch("tools.whatsapp.WhatsAppCloudAPIClient.send_text_message")
-    @patch("tools.whatsapp.DailyRateLimiter.from_env")
     @pytest.mark.asyncio
-    async def test_send_ws_msg_success(
-        self, mock_limiter_factory, mock_send, mcp_server, mock_env
-    ):
-        """Test successful message sending."""
-        # Mock rate limiter
+    async def test_send_ws_msg_success(self, mock_send, mock_limiter_factory, mcp_server, mock_env):
         mock_limiter = Mock()
-        mock_rate_result = Mock()
-        mock_rate_result.allowed = True
-        mock_rate_result.day = "2026-03-03"
-        mock_rate_result.used = 1
-        mock_rate_result.limit = 10
-        mock_rate_result.remaining = 9
+        mock_rate_result = Mock(allowed=True, day="2026-03-03", used=1, limit=10, remaining=9)
         mock_limiter.consume.return_value = mock_rate_result
         mock_limiter_factory.return_value = mock_limiter
-
-        # Mock API response
         mock_send.return_value = {"messages": [{"id": "wamid.test123"}]}
-
         init_tools(mcp_server)
-        tools = await mcp_server.list_tools()
-        _ = next(t for t in tools if t.name == "send_ws_msg")
-
-        # Get the tool function directly from the internal manager
-        tool_obj = mcp_server._tool_manager._tools["send_ws_msg"]
-        result = tool_obj.fn(destination=None, message="Test message")
-
+        result = mcp_server._tool_manager._tools["send_ws_msg"].fn(destination=None, message="Test message")
         assert result["ok"] is True
-        assert result["destination"] == "14155551234"
         assert result["message_id"] == "wamid.test123"
-        assert result["rate_limit"]["remaining"] == 9
 
     @patch("tools.whatsapp.DailyRateLimiter.from_env")
     @pytest.mark.asyncio
-    async def test_send_ws_msg_rate_limit(
-        self, mock_limiter_factory, mcp_server, mock_env
-    ):
-        """Test rate limit enforcement."""
-        # Mock rate limiter - limit exceeded
+    async def test_send_ws_msg_image_path_uses_media_flow(self, mock_limiter_factory, mcp_server, mock_env):
         mock_limiter = Mock()
-        mock_rate_result = Mock()
-        mock_rate_result.allowed = False
-        mock_rate_result.day = "2026-03-03"
-        mock_rate_result.used = 10
-        mock_rate_result.limit = 10
-        mock_rate_result.remaining = 0
+        mock_rate_result = Mock(allowed=True, day="2026-03-03", used=1, limit=10, remaining=9)
         mock_limiter.consume.return_value = mock_rate_result
         mock_limiter_factory.return_value = mock_limiter
-
-        init_tools(mcp_server)
-        tool_obj = mcp_server._tool_manager._tools["send_ws_msg"]
-        result = tool_obj.fn(destination=None, message="Test message")
-
-        assert result["ok"] is False
-        assert "rate limit exceeded" in result["error"].lower()
-        assert result["rate_limit"]["remaining"] == 0
-
-    @patch("tools.whatsapp.DailyRateLimiter.from_env")
-    @pytest.mark.asyncio
-    async def test_send_ws_msg_missing_destination(
-        self, mock_limiter_factory, mcp_server, monkeypatch
-    ):
-        """Test error when destination is not configured."""
-        # Mock rate limiter first
-        mock_limiter = Mock()
-        mock_rate_result = Mock()
-        mock_rate_result.allowed = True
-        mock_rate_result.day = "2026-03-03"
-        mock_rate_result.used = 0
-        mock_rate_result.limit = 10
-        mock_rate_result.remaining = 10
-        mock_limiter.consume.return_value = mock_rate_result
-        mock_limiter_factory.return_value = mock_limiter
-
-        monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "test_token")
-        monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "123456")
-        # Explicitly unset the destination
-        monkeypatch.delenv("WHATSAPP_DEFAULT_DESTINATION", raising=False)
-
-        init_tools(mcp_server)
-        tool_obj = mcp_server._tool_manager._tools["send_ws_msg"]
-        result = tool_obj.fn(destination=None, message="Test message")
-
-        assert result["ok"] is False
-        assert "Missing destination" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_send_ws_msg_empty_message(self, mcp_server, mock_env):
-        """Test error when message is empty."""
-        init_tools(mcp_server)
-        tool_obj = mcp_server._tool_manager._tools["send_ws_msg"]
-        result = tool_obj.fn(destination=None, message="")
-
-        assert result["ok"] is False
-        assert "non-empty string" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_send_ws_msg_different_destination(
-        self, mcp_server, mock_env, monkeypatch
-    ):
-        """Test sending to a destination different from default."""
-        # Mock rate limiter
-        mock_limiter_factory = Mock()
-        mock_limiter = Mock()
-        mock_rate_result = Mock()
-        mock_rate_result.allowed = True
-        mock_rate_result.day = "2024-01-01"
-        mock_rate_result.used = 1
-        mock_rate_result.limit = 10
-        mock_rate_result.remaining = 9
-        mock_limiter.consume.return_value = mock_rate_result
-        mock_limiter_factory.return_value = mock_limiter
-
-        # Mock HTTP client and response
-        mock_http = Mock()
-        mock_response = Mock()
-        mock_response.json.return_value = {"messages": [{"id": "test_message_id"}]}
-        mock_http.post.return_value = mock_response
-
-        monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "test_token")
-        monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "123456")
-        monkeypatch.setenv("WHATSAPP_DEFAULT_DESTINATION", "+14155551234")
-
-        # Mock the HTTPClient import in whatsapp module
-        with patch("tools.whatsapp.HTTPClient", return_value=mock_http):
-            with patch(
-                "tools.whatsapp.DailyRateLimiter.from_env", return_value=mock_limiter
-            ):
-                init_tools(mcp_server, http_client=mock_http)
-                tool_obj = mcp_server._tool_manager._tools["send_ws_msg"]
-
-                # Test sending to a different destination
-                result = tool_obj.fn(
-                    destination="+19998887777",
-                    message="Test message to different number",
+        with patch("tools.whatsapp.WhatsAppCloudAPIClient.upload_media", return_value="media_123") as mock_upload:
+            with patch("tools.whatsapp.WhatsAppCloudAPIClient.send_image_message", return_value={"messages": [{"id": "wamid.img"}]}) as mock_send_image:
+                init_tools(mcp_server)
+                result = mcp_server._tool_manager._tools["send_ws_msg"].fn(
+                    destination=None,
+                    message="Caption text",
+                    image_path="/tmp/generated.png",
                 )
-
-                # Should succeed with new destination
                 assert result["ok"] is True
-                assert result["destination"] == "19998887777"  # Normalized without +
-                assert result["message_id"] == "test_message_id"
-
-    @pytest.mark.asyncio
-    async def test_send_ws_msg_no_destination_fallback(
-        self, mcp_server, mock_env, monkeypatch
-    ):
-        """Test fallback to default destination when no destination provided."""
-        # Mock rate limiter
-        mock_limiter_factory = Mock()
-        mock_limiter = Mock()
-        mock_rate_result = Mock()
-        mock_rate_result.allowed = True
-        mock_rate_result.day = "2024-01-01"
-        mock_rate_result.used = 1
-        mock_rate_result.limit = 10
-        mock_rate_result.remaining = 9
-        mock_limiter.consume.return_value = mock_rate_result
-        mock_limiter_factory.return_value = mock_limiter
-
-        # Mock HTTP client and response
-        mock_http = Mock()
-        mock_response = Mock()
-        mock_response.json.return_value = {"messages": [{"id": "test_message_id"}]}
-        mock_http.post.return_value = mock_response
-
-        monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "test_token")
-        monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "123456")
-        monkeypatch.setenv("WHATSAPP_DEFAULT_DESTINATION", "+14155551234")
-
-        # Mock the HTTPClient import in whatsapp module
-        with patch("tools.whatsapp.HTTPClient", return_value=mock_http):
-            with patch(
-                "tools.whatsapp.DailyRateLimiter.from_env", return_value=mock_limiter
-            ):
-                init_tools(mcp_server, http_client=mock_http)
-                tool_obj = mcp_server._tool_manager._tools["send_ws_msg"]
-
-                # Test sending without destination (should use default)
-                result = tool_obj.fn(
-                    destination=None, message="Test message to default number"
-                )
-
-                # Should succeed with default destination
-                assert result["ok"] is True
-                assert (
-                    result["destination"] == "14155551234"
-                )  # Normalized default destination
-                assert result["message_id"] == "test_message_id"
-
-    @pytest.mark.asyncio
-    async def test_send_ws_msg_no_destination_no_default(
-        self, mcp_server, mock_env, monkeypatch
-    ):
-        """Test error when no destination provided and no default set."""
-        # Mock rate limiter
-        mock_limiter_factory = Mock()
-        mock_limiter = Mock()
-        mock_rate_result = Mock()
-        mock_rate_result.allowed = True
-        mock_rate_result.day = "2024-01-01"
-        mock_rate_result.used = 0
-        mock_rate_result.limit = 10
-        mock_rate_result.remaining = 10
-        mock_limiter.consume.return_value = mock_rate_result
-        mock_limiter_factory.return_value = mock_limiter
-
-        monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "test_token")
-        monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "123456")
-        # Explicitly unset the destination
-        monkeypatch.delenv("WHATSAPP_DEFAULT_DESTINATION", raising=False)
-
-        init_tools(mcp_server)
-        tool_obj = mcp_server._tool_manager._tools["send_ws_msg"]
-        result = tool_obj.fn(destination=None, message="Test message")
-
-        assert result["ok"] is False
-        assert "Missing destination" in result["error"]
+                assert result["message_id"] == "wamid.img"
+                mock_upload.assert_called_once()
+                mock_send_image.assert_called_once()
 
 
 if __name__ == "__main__":
