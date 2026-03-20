@@ -28,7 +28,7 @@ Destination controls:
 - `WHATSAPP_DEFAULT_DESTINATION` (required as fallback; used when no destination is provided)
 
 Daily cap:
-- `WHATSAPP_DAILY_MAX` (default `10`, counted per local day)
+- `WHATSAPP_DAILY_MAX` (default `100`, counted per local day)
 - `WHATSAPP_TIMEZONE` (optional IANA timezone like `America/Los_Angeles`; defaults to system local timezone)
 - `MCPJOSE_RATE_LIMIT_DB` (optional; default `auth/rate_limits.sqlite`)
 
@@ -86,6 +86,33 @@ Send an image by public URL:
 }
 ```
 
+## Image Size Optimization
+
+WhatsApp Cloud API has file size limits. Large images (especially high-resolution PNGs from AI generation) may fail with error #100 (Invalid parameter).
+
+**Recommended workflow for sending generated images:**
+
+1. Check image file size first: `ls -lh image.png`
+2. If larger than ~500KB, resize and compress:
+   ```bash
+   # Resize to 30-50% and convert to JPEG with 80% quality
+   magick image.png -resize 30% -quality 80 image.jpg
+   ```
+3. Send the optimized image with proper MIME type:
+   ```json
+   {
+     "destination": "+573001234567",
+     "message": "Here's the image!",
+     "image_path": "image.jpg",
+     "mime_type": "image/jpeg"
+   }
+   ```
+
+**Best practices:**
+- Resize large images to 1024px max dimension (WhatsApp will resize anyway)
+- Convert PNG to JPEG for photos/artwork (smaller file size)
+- Keep final image under 5MB (ideally under 500KB for faster upload)
+
 ## Troubleshooting
 
 - `Missing destination`: provide a `destination` parameter or set `WHATSAPP_DEFAULT_DESTINATION`.
@@ -93,3 +120,4 @@ Send an image by public URL:
 - `Provide either a local media path or media_url, not both.`: choose one media source.
 - `File not found`: verify the local media path exists.
 - `WhatsApp media upload did not return an id`: check the upload response and Media API permissions.
+- `(#100) Invalid parameter`: image file may be too large. Resize/compress before sending (see Image Size Optimization section above).
