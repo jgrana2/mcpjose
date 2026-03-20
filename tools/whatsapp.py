@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import mimetypes
 import os
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
 from mcp.server.fastmcp import FastMCP
+from PIL import Image, ImageOps
 from requests import HTTPError
 from zoneinfo import ZoneInfo
 
@@ -36,6 +38,64 @@ def _normalize_e164ish(number: str) -> str:
         stripped = stripped[1:]
     stripped = "".join(ch for ch in stripped if ch.isdigit())
     return stripped
+
+
+WHATSAPP_MAX_IMAGE_BYTES = 500 * 1024
+
+
+def _prepare_image_for_whatsapp(
+    file_path: str,
+    mime_type: Optional[str] = None,
+    max_bytes: int = WHATSAPP_MAX_IMAGE_BYTES,
+) -> tuple[Path, Optional[str], Optional[Path]]:
+    path = Path(file_path)
+    resolved_mime_type = mime_type or mimetypes.guess_type(path.name)[0]
+    if not resolved_mime_type or not resolved_mime_type.startswith("image/"):
+        return path, mime_type, None
+    if path.stat().st_size <= max_bytes:
+        return path, resolved_mime_type, None
+
+    with Image.open(path) as source_image:
+        image = ImageOps.exif_transpose(source_image)
+        if image.mode not in ("RGB", "L"):
+            background = Image.new("RGB", image.size, "white")
+            alpha = image.getchannel("A") if "A" in image.getbands() else None
+            background.paste(image.convert("RGBA"), mask=alpha)
+            image = background
+        elif image.mode == "L":
+            image = image.convert("RGB")
+
+        current = image
+        attempt_settings = [
+            (92, 1.0),
+            (85, 0.9),
+            (78, 0.8),
+            (72, 0.7),
+            (65, 0.6),
+            (58, 0.5),
+            (50, 0.4),
+        ]
+
+        for quality, scale in attempt_settings:
+            candidate = current
+            if scale < 1.0:
+                next_size = (
+                    max(1, int(image.width * scale)),
+                    max(1, int(image.height * scale)),
+                )
+                candidate = image.resize(next_size, Image.Resampling.LANCZOS)
+
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_file:
+                temp_path = Path(temp_file.name)
+
+            candidate.save(temp_path, format="JPEG", quality=quality, optimize=True)
+            if temp_path.stat().st_size <= max_bytes:
+                return temp_path, "image/jpeg", temp_path
+            temp_path.unlink(missing_ok=True)
+
+    raise ValueError(
+        f"Image could not be reduced below {max_bytes // 1024} KB for WhatsApp upload: {file_path}"
+    )
 
 
 @dataclass(frozen=True)
@@ -128,16 +188,21 @@ class WhatsAppCloudAPIClient:
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
-        if not mime_type:
-            mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        upload_path, upload_mime_type, temp_path = _prepare_image_for_whatsapp(file_path, mime_type)
+        if not upload_mime_type:
+            upload_mime_type = mimetypes.guess_type(upload_path.name)[0] or "application/octet-stream"
         url = f"https://graph.facebook.com/{self.api_version}/{self.phone_number_id}/media"
-        with path.open("rb") as fh:
-            files = {"file": (path.name, fh, mime_type)}
-            data = {"messaging_product": "whatsapp", "type": mime_type}
-            try:
-                resp = self.http.post(url, data=data, files=files)
-            except HTTPError as exc:
-                raise RuntimeError(self._format_http_error(exc)) from exc
+        try:
+            with upload_path.open("rb") as fh:
+                files = {"file": (upload_path.name, fh, upload_mime_type)}
+                data = {"messaging_product": "whatsapp", "type": upload_mime_type}
+                try:
+                    resp = self.http.post(url, data=data, files=files)
+                except HTTPError as exc:
+                    raise RuntimeError(self._format_http_error(exc)) from exc
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
         payload = resp.json()
         media_id = payload.get("id") if isinstance(payload, dict) else None
         if not media_id:

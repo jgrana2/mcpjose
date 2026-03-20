@@ -8,16 +8,20 @@ This module tests the WhatsApp Cloud API integration including:
 - Media sending
 """
 
+from pathlib import Path
 from tempfile import NamedTemporaryFile
 from unittest.mock import Mock, patch
 
 import pytest
 from mcp.server.fastmcp import FastMCP
+from PIL import Image
 
 from core.http_client import HTTPClient
 from tools.whatsapp import (
+    WHATSAPP_MAX_IMAGE_BYTES,
     WhatsAppCloudAPIClient,
     WhatsAppSendResult,
+    _prepare_image_for_whatsapp,
     _normalize_e164ish,
     _parse_csv_set,
     init_tools,
@@ -132,6 +136,39 @@ class TestWhatsAppCloudAPIClient:
             client = WhatsAppCloudAPIClient(access_token="test_token", phone_number_id="123456")
             media_id = client.upload_media(tmp.name, mime_type="image/png")
         assert media_id == "media_123"
+
+    def test_prepare_image_for_whatsapp_reduces_large_image_below_limit(self):
+        with NamedTemporaryFile(suffix=".bmp") as tmp:
+            image = Image.effect_noise((2200, 2200), 100).convert("RGB")
+            image.save(tmp.name, format="BMP")
+            assert Path(tmp.name).stat().st_size > WHATSAPP_MAX_IMAGE_BYTES
+
+            optimized_path, optimized_mime, temp_path = _prepare_image_for_whatsapp(tmp.name)
+
+            assert optimized_mime == "image/jpeg"
+            assert temp_path == optimized_path
+            assert optimized_path.stat().st_size <= WHATSAPP_MAX_IMAGE_BYTES
+            temp_path.unlink(missing_ok=True)
+
+    @patch.object(HTTPClient, "post")
+    def test_upload_media_optimizes_large_image_before_upload(self, mock_post):
+        mock_response = Mock()
+        mock_response.json.return_value = {"id": "media_123"}
+        mock_post.return_value = mock_response
+
+        with NamedTemporaryFile(suffix=".bmp") as tmp:
+            image = Image.effect_noise((2200, 2200), 100).convert("RGB")
+            image.save(tmp.name, format="BMP")
+
+            client = WhatsAppCloudAPIClient(access_token="test_token", phone_number_id="123456")
+            media_id = client.upload_media(tmp.name)
+
+        assert media_id == "media_123"
+        files = mock_post.call_args[1]["files"]
+        uploaded_name, _, uploaded_mime = files["file"]
+        assert uploaded_name.endswith(".jpg")
+        assert uploaded_mime == "image/jpeg"
+        assert mock_post.call_args[1]["data"]["type"] == "image/jpeg"
 
     @patch.object(HTTPClient, "post")
     def test_send_image_message(self, mock_post):
