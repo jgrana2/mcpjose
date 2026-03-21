@@ -3,6 +3,9 @@
 import logging
 import os
 import sys
+import threading
+import time
+import schedule
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from twscrape import API
@@ -29,8 +32,12 @@ from tools.whatsapp import init_tools as init_whatsapp_tools  # noqa: E402
 from tools.wolfram_alpha import init_tools as init_wolfram_alpha_tools  # noqa: E402
 from tools.google_maps import init_tools as init_google_maps_tools  # noqa: E402
 from tools.code_editor import init_tools as init_code_editor_tools  # noqa: E402
+from core.memory import MemoryService  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+# Initialize memory service
+memory_service = MemoryService()
 
 
 def create_server() -> FastMCP:
@@ -39,7 +46,9 @@ def create_server() -> FastMCP:
     Returns:
         Configured FastMCP server instance.
     """
+    print("Creating server...")
     mcp = FastMCP("mcpjose")
+    print("Server created.")
 
     # Initialize navigation tools
     init_navigation_tools(mcp)
@@ -61,6 +70,20 @@ def create_server() -> FastMCP:
 
     # Initialize AI tools
     _init_ai_tools(mcp)
+
+    # Initialize memory tools
+    _init_memory_tools(mcp)
+
+    # Initialize cron tools
+    _init_cron_tools(mcp)
+
+    # Start cron worker thread
+    def run_scheduler():
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
+
+    threading.Thread(target=run_scheduler, daemon=True).start()
 
     return mcp
 
@@ -84,6 +107,51 @@ def _init_search_tools(mcp: FastMCP) -> None:
         """
         provider = SearchFactory.create()
         return provider.search(query)
+
+
+def _init_memory_tools(mcp: FastMCP) -> None:
+    """Initialize memory-related tools."""
+
+    @mcp.tool()
+    def save_memory(
+        summary: str, content: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, str]:
+        """Save interaction to long-term memory."""
+        memory_service.save_interaction(summary, content, metadata if metadata else {})
+        return {"status": "success"}
+
+    @mcp.tool()
+    def query_memory(query: str, n_results: int = 3) -> List[Dict[str, Any]]:
+        """Query long-term memory using semantic search."""
+        return memory_service.query_memory(query, n_results)
+
+
+def _init_cron_tools(mcp: FastMCP) -> None:
+    """Initialize cron job tools."""
+
+    @mcp.tool()
+    def add_cron_job(
+        task_name: str, schedule_str: str, task_command: str
+    ) -> Dict[str, str]:
+        """Add a cron-like task to be executed periodically.
+        schedule_str: 'every 1 minute', 'every 1 hour', '10:30' (daily at 10:30).
+        """
+
+        def job():
+            logger.info(f"Running scheduled task: {task_name}")
+            os.system(task_command)
+
+        try:
+            if "minute" in schedule_str:
+                schedule.every(int(schedule_str.split()[1])).minutes.do(job)
+            elif "hour" in schedule_str:
+                schedule.every(int(schedule_str.split()[1])).hours.do(job)
+            else:
+                schedule.every().day.at(schedule_str).do(job)
+
+            return {"status": "success", "message": f"Job '{task_name}' added."}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
 
 def _init_ai_tools(mcp: FastMCP) -> None:
@@ -172,7 +240,10 @@ def _init_ai_tools(mcp: FastMCP) -> None:
             """
             try:
                 # Build kwargs for API call
-                api_kwargs = {"model": model, "response_format": response_format}
+                api_kwargs: Dict[str, Any] = {
+                    "model": model,
+                    "response_format": response_format,
+                }
                 if language:
                     api_kwargs["language"] = language
                 if timestamp_granularities:

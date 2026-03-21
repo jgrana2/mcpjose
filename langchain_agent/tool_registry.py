@@ -6,7 +6,7 @@ import asyncio
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from core.config import get_config
@@ -106,7 +106,22 @@ class ProjectToolRegistry:
             "total_chars": len(content),
         }
 
-    # Search / navigation
+    # Memory tools
+    def save_memory(
+        self, summary: str, content: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, str]:
+        """Save interaction to long-term memory."""
+        from core.memory import MemoryService
+
+        MemoryService().save_interaction(summary, content, metadata if metadata else {})
+        return {"status": "success"}
+
+    def query_memory(self, query: str, n_results: int = 3) -> List[Dict[str, Any]]:
+        """Query long-term memory using semantic search."""
+        from core.memory import MemoryService
+
+        return MemoryService().query_memory(query, n_results)
+
     def search(self, query: str) -> Dict[str, Any]:
         """Search the web using configured provider (DuckDuckGo or Google PSE)."""
         return SearchFactory.create().search(query)
@@ -653,6 +668,12 @@ class ProjectToolRegistry:
             ("read_agents_md", "Read AGENTS.md instructions.", self.read_agents_md),
             ("list_skills", "List all discovered project skills.", self.list_skills),
             ("read_skill", "Read a skill by name or skill_id.", self.read_skill),
+            ("save_memory", "Save interaction to long-term memory.", self.save_memory),
+            (
+                "query_memory",
+                "Query long-term memory using semantic search.",
+                self.query_memory,
+            ),
         ]
 
         return [

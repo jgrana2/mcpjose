@@ -13,3 +13,6 @@ langchain
 langchain-openai
 googlemaps==4.10.0
 flask>=2.0.0
+schedule
+chromadb
+langchain-chroma
