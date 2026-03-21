@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -41,6 +42,36 @@ def _normalize_e164ish(number: str) -> str:
     if stripped.startswith("+"):
         stripped = stripped[1:]
     return "".join(ch for ch in stripped if ch.isdigit())
+
+
+def _run_async_from_sync(factory: "callable[[], Any]") -> Any:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(factory())
+
+    result: dict[str, Any] = {}
+    error: dict[str, BaseException] = {}
+
+    def _runner() -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            result["value"] = loop.run_until_complete(factory())
+        except BaseException as exc:  # pragma: no cover - propagated below
+            error["exc"] = exc
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    thread.join()
+
+    if error:
+        raise error["exc"]
+
+    return result["value"]
 
 
 class ProjectToolRegistry:
@@ -143,13 +174,7 @@ class ProjectToolRegistry:
     def x_search(self, topic: str) -> Dict[str, Any]:
         """Search recent X/Twitter posts using twscrape."""
         try:
-            return asyncio.run(self._x_search_async(topic))
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(self._x_search_async(topic))
-            finally:
-                loop.close()
+            return _run_async_from_sync(lambda: self._x_search_async(topic))
         except Exception as exc:
             return {"error": f"x_search failed: {exc}", "topic": topic}
 
