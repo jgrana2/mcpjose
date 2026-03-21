@@ -17,6 +17,9 @@ python -m langchain_agent.main --help
 # One-shot prompt
 python -m langchain_agent.main "Summarize latest MCP releases and save notes to userapp/notes.txt"
 
+# Interactive terminal session
+python -m langchain_agent.main --interactive
+
 # WhatsApp-only mode
 python -m langchain_agent.main --whatsapp
 
@@ -25,6 +28,8 @@ python -m langchain_agent.main --list-tools
 python -m langchain_agent.main --list-skills
 python -m langchain_agent.main --show-context
 ```
+
+Interactive mode keeps the conversation history in memory for the current terminal session.
 
 ## Configuration
 

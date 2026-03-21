@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .agent import MCPJoseLangChainAgent
 from .context import ProjectContextLoader
+from .interactive_runner import run_interactive_loop
 from .whatsapp_runner import run_whatsapp_loop
 
 
@@ -25,6 +26,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--verbose", action="store_true", help="Enable LangChain verbose logs"
+    )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Run the LangChain agent in an interactive terminal session",
     )
     parser.add_argument(
         "--whatsapp",
@@ -76,6 +82,22 @@ def main() -> int:
         except KeyboardInterrupt:
             return 0
 
+    if args.interactive:
+        if args.prompt:
+            parser.error("prompt cannot be used together with --interactive")
+
+        try:
+            return run_interactive_loop(
+                repo_root=repo_root,
+                model=args.model,
+                temperature=args.temperature,
+                max_iterations=args.max_iterations,
+                verbose=args.verbose,
+            )
+        except Exception as exc:
+            print(f"Failed to initialize interactive LangChain agent: {exc}", file=sys.stderr)
+            return 1
+
     if args.show_context:
         loader = ProjectContextLoader(repo_root=repo_root)
         print(loader.build_agent_context())
@@ -106,7 +128,7 @@ def main() -> int:
 
     if not args.prompt:
         parser.error(
-            "prompt is required unless --whatsapp, --list-tools, --list-skills, or --show-context is used"
+            "prompt is required unless --interactive, --whatsapp, --list-tools, --list-skills, or --show-context is used"
         )
 
     try:
