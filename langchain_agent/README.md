@@ -20,6 +20,9 @@ python -m langchain_agent.main "Summarize latest MCP releases and save notes to 
 # Interactive terminal session
 python -m langchain_agent.main --interactive
 
+# Interactive voice input
+python -m langchain_agent.main --interactive --voice
+
 # WhatsApp-only mode
 python -m langchain_agent.main --whatsapp
 
@@ -30,6 +33,9 @@ python -m langchain_agent.main --show-context
 ```
 
 Interactive mode keeps the conversation history in memory for the current terminal session.
+When `--voice` is enabled, it first prompts you to choose a microphone, then press Enter on an empty prompt to record a spoken turn.
+The recorder uses an installed external command (`ffmpeg` preferred, `rec` from SoX as fallback).
+Responses in terminal sessions are rendered as Markdown when supported by the terminal, with a plain-text fallback otherwise.
 
 ## Configuration
 

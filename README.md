@@ -148,7 +148,12 @@ python -m langchain_agent.main "Use available skills and tools to research MCP u
 
 # Run over WhatsApp
 python -m langchain_agent.main --whatsapp
+
+# Speak to the interactive agent instead of typing
+python -m langchain_agent.main --interactive --voice
 ```
+
+Agent responses in terminal sessions are rendered as Markdown when the terminal supports it, with a plain-text fallback otherwise.
 
 ## Available Tools
 

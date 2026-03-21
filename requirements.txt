@@ -16,3 +16,4 @@ flask>=2.0.0
 schedule
 chromadb
 langchain-chroma
+rich

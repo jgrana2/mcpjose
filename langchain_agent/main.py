@@ -6,10 +6,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from .agent import MCPJoseLangChainAgent
 from .context import ProjectContextLoader
 from .interactive_runner import run_interactive_loop
-from .whatsapp_runner import run_whatsapp_loop
+from . import terminal_output
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,6 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--interactive",
         action="store_true",
         help="Run the LangChain agent in an interactive terminal session",
+    )
+    parser.add_argument(
+        "--voice",
+        action="store_true",
+        help="Enable push-to-talk voice input in interactive mode",
     )
     parser.add_argument(
         "--whatsapp",
@@ -69,6 +73,8 @@ def main() -> int:
 
     if args.whatsapp:
         try:
+            from .whatsapp_runner import run_whatsapp_loop
+
             run_whatsapp_loop(
                 model=args.model,
                 temperature=args.temperature,
@@ -82,6 +88,9 @@ def main() -> int:
         except KeyboardInterrupt:
             return 0
 
+    if args.voice and not args.interactive:
+        parser.error("--voice requires --interactive")
+
     if args.interactive:
         if args.prompt:
             parser.error("prompt cannot be used together with --interactive")
@@ -93,6 +102,7 @@ def main() -> int:
                 temperature=args.temperature,
                 max_iterations=args.max_iterations,
                 verbose=args.verbose,
+                voice_mode=args.voice,
             )
         except Exception as exc:
             print(f"Failed to initialize interactive LangChain agent: {exc}", file=sys.stderr)
@@ -104,6 +114,8 @@ def main() -> int:
         return 0
 
     try:
+        from .agent import MCPJoseLangChainAgent
+
         agent = MCPJoseLangChainAgent(
             repo_root=repo_root,
             model=args.model,
@@ -132,7 +144,7 @@ def main() -> int:
         )
 
     try:
-        print(agent.run(args.prompt))
+        terminal_output.print_markdown(agent.run(args.prompt))
         return 0
     except Exception as exc:
         print(f"Agent execution failed: {exc}", file=sys.stderr)
