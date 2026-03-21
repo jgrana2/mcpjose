@@ -2,9 +2,9 @@
 
 import io
 import logging
-from html.parser import HTMLParser
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
+from bs4 import BeautifulSoup
 from mcp.server.fastmcp import FastMCP
 from pypdf import PdfReader
 
@@ -12,35 +12,6 @@ from core.http_client import HTTPClient
 from core.utils import clean_text_whitespace, is_pdf_file
 
 logger = logging.getLogger(__name__)
-
-
-class HTMLTextExtractor(HTMLParser):
-    """Extract text content from HTML, filtering out script/style tags."""
-
-    SKIP_TAGS = {"script", "style", "nav", "header", "footer"}
-    BLOCK_TAGS = {"p", "div", "br", "h1", "h2", "h3", "h4", "h5", "h6"}
-
-    def __init__(self):
-        super().__init__()
-        self.text_parts: list[str] = []
-        self.current_tag: Optional[str] = None
-
-    def handle_starttag(self, tag: str, attrs: list) -> None:
-        self.current_tag = tag
-        if tag in self.BLOCK_TAGS:
-            self.text_parts.append("\n")
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in self.BLOCK_TAGS:
-            self.text_parts.append("\n")
-        self.current_tag = None
-
-    def handle_data(self, data: str) -> None:
-        if self.current_tag not in self.SKIP_TAGS:
-            self.text_parts.append(data)
-
-    def get_text(self) -> str:
-        return " ".join(self.text_parts)
 
 
 def extract_pdf_content(url: str, http_client: HTTPClient) -> Optional[str]:
@@ -77,22 +48,35 @@ def extract_pdf_content(url: str, http_client: HTTPClient) -> Optional[str]:
         return None
 
 
-def extract_html_content(url: str, http_client: HTTPClient) -> str:
-    """Fetch and extract text content from an HTML page.
+def extract_html_content(url: str, http_client: HTTPClient) -> Dict[str, Any]:
+    """Fetch and extract text, links, and image sources from an HTML page.
 
     Args:
         url: URL to fetch.
         http_client: HTTP client for downloading.
 
     Returns:
-        Extracted text content.
+        Dictionary with 'text', 'links', and 'images'.
     """
     response = http_client.get(url)
+    soup = BeautifulSoup(response.text, "html.parser")
 
-    extractor = HTMLTextExtractor()
-    extractor.feed(response.text)
+    # Remove script, style, nav, header, footer
+    for tag in soup(["script", "style", "nav", "header", "footer"]):
+        tag.decompose()
 
-    return clean_text_whitespace(extractor.get_text())
+    text = clean_text_whitespace(soup.get_text())
+    links = [
+        {"text": a.get_text(strip=True), "href": a.get("href")}
+        for a in soup.find_all("a", href=True)
+    ]
+    images = [img.get("src") for img in soup.find_all("img", src=True)]
+
+    return {
+        "text": text,
+        "links": links,
+        "images": images,
+    }
 
 
 def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
@@ -112,7 +96,7 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
             url: The URL to navigate to.
 
         Returns:
-            Dictionary with 'content', 'url', and 'type' keys.
+            Dictionary with 'content' (for PDF) or 'text', 'links', 'images' (for HTML), 'url', and 'type' keys.
         """
         try:
             # Try PDF extraction first for PDF URLs
@@ -122,8 +106,14 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
                     return {"content": pdf_content, "url": url, "type": "pdf"}
 
             # Fall back to HTML extraction
-            content = extract_html_content(url, client)
-            return {"content": content, "url": url, "type": "html"}
+            html_data = extract_html_content(url, client)
+            return {
+                "text": html_data["text"],
+                "links": html_data["links"],
+                "images": html_data["images"],
+                "url": url,
+                "type": "html",
+            }
 
         except Exception as e:
             return {"error": f"Error navigating to {url}: {str(e)}", "url": url}
