@@ -16,6 +16,10 @@ def _write(path: Path, content: str) -> None:
 def test_context_loader_discovers_agents_and_skills(tmp_path: Path) -> None:
     _write(tmp_path / "AGENTS.md", "# Rules\nAlways validate inputs.")
     _write(
+        tmp_path / "MEMORY.md",
+        "# Memory\nStore durable preferences.\nDo not store secrets.",
+    )
+    _write(
         tmp_path / ".agents" / "skills" / "alpha" / "SKILL.md",
         "# Alpha\nAlpha description\nAlpha details.",
     )
@@ -37,6 +41,8 @@ def test_context_loader_discovers_agents_and_skills(tmp_path: Path) -> None:
     assert "Project Skills" in context
     assert "alpha" in context
     assert "beta" in context
+    assert "MEMORY.md Guidance" in context
+    assert "Store durable preferences." in context
 
 
 def test_context_loader_handles_duplicate_skill_names(tmp_path: Path) -> None:

@@ -150,6 +150,8 @@ class MCPJoseLangChainAgent:
             "You are MCP Jose's LangChain agent.\n"
             "You MUST use project tools when external actions or data access are needed.\n"
             "Follow AGENTS.md guidance and use project skills when relevant.\n"
+            "Consult MEMORY.md guidance for persistent preferences, prior decisions, and project conventions.\n"
+            "Use query_memory to recover relevant past context and save_memory to persist useful summaries.\n"
             "If a request touches project workflows, call read_agents_md and read_skill.\n"
             "Always prefer factual tool outputs over assumptions.\n\n"
             f"{context_block}"

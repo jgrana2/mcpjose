@@ -45,6 +45,16 @@ class ProjectContextLoader:
             return ""
         return path.read_text(encoding="utf-8")
 
+    def memory_path(self) -> Path:
+        return self.repo_root / "MEMORY.md"
+
+    def load_memory_guidance(self) -> str:
+        """Load MEMORY.md content if available."""
+        path = self.memory_path()
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8")
+
     def discover_skill_files(self) -> list[Path]:
         """Return every SKILL.md from configured skill directories."""
         files: list[Path] = []
@@ -75,12 +85,16 @@ class ProjectContextLoader:
     def build_agent_context(
         self,
         max_agents_chars: int = 6000,
+        max_memory_chars: int = 3000,
         max_skill_chars: int = 14000,
         per_skill_chars: int = 700,
     ) -> str:
-        """Build prompt-safe context with AGENTS.md plus skill summaries."""
+        """Build prompt-safe context with AGENTS.md, MEMORY.md, and skill summaries."""
         agents_text = self.load_agents_guidance()
         agents_excerpt = agents_text[:max_agents_chars]
+
+        memory_text = self.load_memory_guidance()
+        memory_excerpt = memory_text[:max_memory_chars]
 
         skills = self.load_skills()
         skill_lines: list[str] = []
@@ -105,6 +119,8 @@ class ProjectContextLoader:
         return (
             "## AGENTS.md Guidance (excerpt)\n"
             f"{agents_excerpt or 'AGENTS.md was not found.'}\n\n"
+            "## MEMORY.md Guidance (excerpt)\n"
+            f"{memory_excerpt or 'MEMORY.md was not found.'}\n\n"
             "## Project Skills (catalog + excerpts)\n"
             f"{skill_block}"
         )
