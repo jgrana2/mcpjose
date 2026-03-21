@@ -200,17 +200,17 @@ ngrok http 5000
 ```
 
 ### Agent Skills
-The project includes 15+ specialized Agent Skills for coding agents:
+The project includes specialized Agent Skills for coding agents:
 
 - **Research & Information Gathering**: `mcpjose-research`, `mcp-builder`
 - **Document Creation & Manipulation**: `docx`, `pdf`, `pptx`, `xlsx`, `doc-coauthoring`
-- **Design & Visual Content**: `frontend-design`, `canvas-design`, `algorithmic-art`, `slack-gif-creator`, `theme-factory`
+- **Design & Visual Content**: `frontend-design`
 - **Web Development**: `web-artifacts-builder`, `webapp-testing`
-- **Communication & Internal Tools**: `internal-comms`, `brand-guidelines`
+- **Communication & Internal Tools**: `internal-comms`
 - **Math & Computation**: `wolfram-alpha`
 - **Meta Skills**: `skill-creator`
+- **Connectors & Platforms**: `notion`, `linear`, `sentry`, `vercel-deploy`, `netlify-deploy`, `cloudflare-deploy`, `render-deploy`, `aspnet-core`, `winui-app`
 
-Skills are automatically discovered from `.agents/skills/` and `skills/` and provide domain-specific knowledge, structured workflows, and best practices.
 
 ## Development
 

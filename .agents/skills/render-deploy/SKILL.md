@@ -108,7 +108,7 @@ render --version
 ```
 If not installed, offer to install:
 - macOS: `brew install render`
-- Linux/macOS: `curl -fsSL https://raw.githubusercontent.com/render-oss/cli/main/bin/install.sh | sh`
+- Other platforms: Follow [Render's official CLI installation instructions](https://github.com/render-oss/cli#installation)
 
 **4. MCP Setup (if MCP isn't configured)**
 

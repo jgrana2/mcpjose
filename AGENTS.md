@@ -48,7 +48,6 @@ This project includes **Agent Skills** (https://agentskills.io) in the `.agents/
 - **frontend-design**: Create distinctive, production-grade frontend interfaces with high design quality, avoiding generic AI aesthetics
 - **canvas-design**: Create beautiful visual art in .png and .pdf documents using design philosophy
 - **algorithmic-art**: Create algorithmic art using p5.js with seeded randomness, flow fields, and particle systems
-- **slack-gif-creator**: Create animated GIFs optimized for Slack with constraints and validation
 - **theme-factory**: Apply 10 pre-set themes or generate custom themes for artifacts (slides, docs, HTML pages)
 
 #### 🌐 Web Development
@@ -57,7 +56,6 @@ This project includes **Agent Skills** (https://agentskills.io) in the `.agents/
 
 #### 📊 Communication & Internal Tools
 - **internal-comms**: Write internal communications (status reports, leadership updates, newsletters, FAQs, incident reports)
-- **brand-guidelines**: Apply Anthropic's official brand colors and typography to artifacts
 
 #### 🛠️ Meta Skills
 - **skill-creator**: Create new skills, modify existing skills, run evaluations, and optimize skill performance
