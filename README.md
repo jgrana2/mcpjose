@@ -112,26 +112,26 @@ python -m mcp_server.server
 # Get help with available CLI commands
 python cli.py --help
 
-# Call OpenAI LLM directly
-python cli.py call-llm "Your prompt here"
+# List all shared tools exposed by the registry
+python cli.py tool list
 
-# Process images with OpenAI Vision
-python cli.py openai-vision image.jpg "Describe this image"
+# Call a tool with JSON arguments
+python cli.py tool call call_llm --json '{"prompt": "Your prompt here"}'
 
-# Transcribe audio files
-python cli.py transcribe-audio audio.mp3
+# Call a tool with repeated key=value arguments
+python cli.py tool call search --arg query="latest AI developments"
 
-# Generate images with Gemini
-python cli.py generate-image "A beautiful sunset over mountains"
+# Run OCR via the shared registry
+python cli.py tool call google_ocr --arg input_file=document.pdf --arg file_type=pdf
 
-# Extract text with Google OCR
-python cli.py google-ocr document.pdf
-
-# Search the web
-python cli.py search "latest AI developments"
+# Search Google Maps places
+python cli.py tool call search_places --arg query="coffee shops" --arg max_results=3
 
 # Send WhatsApp messages
-python cli.py send-ws-msg "+1234567890" "Hello from MCP Jose!"
+python cli.py tool call send_ws_msg --arg destination="+1234567890" --arg message="Hello from MCP Jose!"
+
+# Run the webhook server
+python cli.py whatsapp-webhook --port 5000
 ```
 
 ### Using the LangChain Agent

@@ -1,4 +1,4 @@
-"""LangChain-compatible wrappers for all MCP Jose tools."""
+"""Shared tool registry for MCP Jose surfaces."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from tools.code_editor import (
 from tools.filesystem import FilesystemTools
 from tools.navigation import extract_html_content, extract_pdf_content
 from tools.whatsapp import WhatsAppCloudAPIClient, WhatsAppSendResult
+from tools.wolfram_alpha import WolframAlphaClient
 
 from .context import ProjectContextLoader, SkillDocument
 
@@ -375,6 +376,73 @@ class ProjectToolRegistry:
         except Exception as exc:
             return {"error": f"transcribe_audio failed: {exc}"}
 
+    def search_places(
+        self,
+        query: str,
+        location: Optional[str] = None,
+        radius: Optional[int] = None,
+        place_type: Optional[str] = None,
+        max_results: int = 5,
+    ) -> Dict[str, Any]:
+        """Search for places using Google Maps Places API."""
+        try:
+            provider = ProviderFactory.create_maps("google")
+            results = provider.search_places(
+                query=query,
+                location=location,
+                radius=radius,
+                place_type=place_type,
+                max_results=max_results,
+            )
+            return {
+                "success": True,
+                "query": query,
+                "count": len(results),
+                "results": results,
+            }
+        except Exception as exc:
+            return {"success": False, "error": str(exc), "query": query}
+
+    def get_place_details(self, place_id: str) -> Dict[str, Any]:
+        """Get detailed information about a place using Google Maps."""
+        try:
+            provider = ProviderFactory.create_maps("google")
+            details = provider.get_place_details(place_id)
+            return {
+                "success": True,
+                "place_id": place_id,
+                "details": details,
+            }
+        except Exception as exc:
+            return {"success": False, "error": str(exc), "place_id": place_id}
+
+    def wolfram_alpha(
+        self,
+        query: str,
+        maxchars: Optional[int] = None,
+        units: Optional[str] = None,
+        assumption: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Query Wolfram Alpha's LLM API for factual or computed answers."""
+        try:
+            client = WolframAlphaClient(
+                app_id=os.getenv("WOLFRAM_ALPHA_APP_ID", ""),
+                http_client=self.http_client,
+            )
+            return client.query(
+                query=query,
+                maxchars=maxchars,
+                units=units,
+                assumption=assumption,
+            )
+        except Exception as exc:
+            return {
+                "ok": False,
+                "provider": "wolfram_alpha",
+                "query": query,
+                "error": str(exc),
+            }
+
     # WhatsApp tool
     def send_ws_msg(
         self,
@@ -510,6 +578,25 @@ class ProjectToolRegistry:
                 rate_limit_remaining=rate.remaining,
             ).to_dict()
 
+    def get_ws_messages(
+        self,
+        limit: int = 10,
+        since: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Retrieve recent WhatsApp webhook messages from local storage."""
+        try:
+            from tools.whatsapp_webhook import get_message_store
+
+            store = get_message_store()
+            messages = store.get_recent(limit=limit, since=since)
+            return {
+                "ok": True,
+                "messages": [message.to_dict() for message in messages],
+                "count": len(messages),
+            }
+        except Exception as exc:
+            return {"ok": False, "messages": [], "count": 0, "error": str(exc)}
+
     # Filesystem tools
     def read_file(
         self,
@@ -586,14 +673,9 @@ class ProjectToolRegistry:
             "error": f"Unknown command '{command}'. Use: view, create, str_replace, insert, undo_edit."
         }
 
-    def as_langchain_tools(self) -> list[BaseTool]:
-        """Build LangChain StructuredTool objects for all project tools."""
-        if StructuredTool is None:
-            raise RuntimeError(
-                "langchain-core is not installed. Install langchain + langchain-openai."
-            )
-
-        specs: list[tuple[str, str, Any]] = [
+    def tool_specs(self) -> list[tuple[str, str, Any]]:
+        """Return the canonical shared tool definitions."""
+        return [
             ("search", "Search the web using configured search backend.", self.search),
             (
                 "navigate_to_url",
@@ -628,9 +710,29 @@ class ProjectToolRegistry:
                 self.transcribe_audio,
             ),
             (
+                "search_places",
+                "Search for places with Google Maps Places API.",
+                self.search_places,
+            ),
+            (
+                "get_place_details",
+                "Get place details from Google Maps Places API.",
+                self.get_place_details,
+            ),
+            (
+                "wolfram_alpha",
+                "Query Wolfram Alpha for exact or computed answers.",
+                self.wolfram_alpha,
+            ),
+            (
                 "send_ws_msg",
                 "Send WhatsApp message through Meta Cloud API.",
                 self.send_ws_msg,
+            ),
+            (
+                "get_ws_messages",
+                "Read recent WhatsApp webhook messages from local storage.",
+                self.get_ws_messages,
             ),
             (
                 "read_file",
@@ -676,13 +778,45 @@ class ProjectToolRegistry:
             ),
         ]
 
+    def list_tool_specs(self) -> list[dict[str, str]]:
+        """Return shared tool metadata for CLI/UI consumers."""
+        return [
+            {"name": name, "description": description}
+            for name, description, _func in self.tool_specs()
+        ]
+
+    def call_tool(
+        self,
+        name: str,
+        arguments: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        """Call a shared tool by name with keyword arguments."""
+        tools = {tool_name: func for tool_name, _description, func in self.tool_specs()}
+        if name not in tools:
+            available = ", ".join(sorted(tools))
+            raise ValueError(f"Unknown tool '{name}'. Available tools: {available}")
+
+        return tools[name](**(arguments or {}))
+
+    def register_mcp_tools(self, mcp: Any) -> None:
+        """Register the canonical shared tools with an MCP server."""
+        for _name, _description, func in self.tool_specs():
+            mcp.tool()(func)
+
+    def as_langchain_tools(self) -> list[BaseTool]:
+        """Build LangChain StructuredTool objects for all project tools."""
+        if StructuredTool is None:
+            raise RuntimeError(
+                "langchain-core is not installed. Install langchain + langchain-openai."
+            )
+
         return [
             StructuredTool.from_function(
                 func=func,
                 name=name,
                 description=description,
             )
-            for name, description, func in specs
+            for name, description, func in self.tool_specs()
         ]
 
     def _load_skills(self) -> Dict[str, SkillDocument]:
