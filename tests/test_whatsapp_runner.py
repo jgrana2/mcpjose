@@ -67,6 +67,10 @@ class _Fetcher:
         self.calls.append(media_id)
         return self.path
 
+    def fetch_media(self, media_id: str):
+        self.calls.append(media_id)
+        return self.path
+
 
 def test_poll_once_routes_new_messages_through_agent_and_reply_sender() -> None:
     store = _Store([_Message("seed", "573002612420", "seed", "2026-03-19T19:00:00")])
@@ -151,6 +155,40 @@ def test_poll_once_auto_analyzes_image_messages_with_fetcher() -> None:
             media_id="media-123",
         )
     )
+
+
+def test_poll_once_auto_transcribes_audio_messages_with_fetcher() -> None:
+    store = _Store([_Message("seed", "573002612420", "seed", "2026-03-19T19:00:00")])
+    agent = _Agent()
+    sender = _Sender()
+    fetcher = _Fetcher("/tmp/whatsapp_audio.m4a")
+
+    loop = WhatsAppAgentLoop(
+        agent=agent,
+        store=store,
+        reply_sender=sender.send,
+        media_fetcher=fetcher,
+        allowed_sender="573002612420",
+        scan_limit=10,
+    )
+
+    store.messages.append(
+        _Message(
+            "audio1",
+            "573002612420",
+            "",
+            "2026-03-19T19:03:00",
+            type="audio",
+            media_id="media-audio-123",
+        )
+    )
+
+    handled = loop.poll_once()
+
+    assert handled == 1
+    assert fetcher.calls == ["media-audio-123"]
+    assert "Audio transcription for WhatsApp media media-audio-123" in agent.calls[0][0]
+    assert sender.sent == [("573002612420", "reply: " + agent.calls[0][0])]
 
     handled = loop.poll_once()
 

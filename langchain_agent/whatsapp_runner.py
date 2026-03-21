@@ -62,7 +62,7 @@ class WhatsAppMediaFetcher:
     access_token: str
     api_version: str = "v22.0"
 
-    def fetch_image(self, media_id: str, output_dir: Optional[Path] = None) -> Path:
+    def fetch_media(self, media_id: str, output_dir: Optional[Path] = None) -> Path:
         from core.http_client import HTTPClient
 
         http = HTTPClient()
@@ -74,9 +74,26 @@ class WhatsAppMediaFetcher:
         resp = http.get(url)
         out_dir = output_dir or Path(tempfile.gettempdir())
         out_dir.mkdir(parents=True, exist_ok=True)
-        filename = meta.get("mime_type", "image/jpeg").replace("/", "_")
-        path = out_dir / f"whatsapp_{media_id}_{filename}"
+        mime_type = meta.get("mime_type", "application/octet-stream")
+        extension = {
+            "audio/ogg": ".ogg",
+            "audio/mpeg": ".mp3",
+            "audio/mp4": ".m4a",
+            "audio/x-m4a": ".m4a",
+            "video/mp4": ".mp4",
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "application/pdf": ".pdf",
+        }.get(mime_type, "")
+        safe_mime = mime_type.replace("/", "_")
+        path = out_dir / f"whatsapp_{media_id}_{safe_mime}{extension}"
         path.write_bytes(resp.content)
+        return path
+
+    def fetch_image(self, media_id: str, output_dir: Optional[Path] = None) -> Path:
+        path = self.fetch_media(media_id, output_dir=output_dir)
+        if path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
+            raise RuntimeError(f"Unsupported image format for vision: {path.suffix or path.name}")
         return path
 
 
@@ -163,7 +180,45 @@ class WhatsAppAgentLoop:
                 return analysis
             return caption or "Analyze this image."
 
+        if msg_type in {"audio", "voice"} and media_id:
+            transcript = self._transcribe_audio(media_id=media_id)
+            if transcript:
+                return transcript
+            return caption or "Transcribe this audio message."
+
         return body or caption
+
+    def _transcribe_audio(self, media_id: str) -> str:
+        if not self.media_fetcher:
+            return ""
+
+        try:
+            audio_path = self.media_fetcher.fetch_media(media_id)
+        except Exception as exc:
+            logger.error("Failed to fetch WhatsApp audio %s: %s", media_id, exc)
+            return ""
+
+        try:
+            result = self.agent.tool_registry.call_tool(
+                "transcribe_audio",
+                {"audio_path": str(audio_path)},
+            )
+        except Exception as exc:
+            logger.error("Failed to transcribe WhatsApp audio %s: %s", media_id, exc)
+            return ""
+
+        if isinstance(result, dict):
+            error = result.get("error")
+            if error:
+                logger.error("WhatsApp audio transcription returned error: %s", error)
+                return ""
+            text = result.get("text") or result.get("transcript") or result.get("output")
+            if isinstance(text, str) and text.strip():
+                return f"Audio transcription for WhatsApp media {media_id}:\n{text.strip()}"
+        text = str(result).strip()
+        if text:
+            return f"Audio transcription for WhatsApp media {media_id}:\n{text}"
+        return ""
 
     def _analyze_image(self, media_id: str, caption: str = "") -> str:
         if not self.media_fetcher:
@@ -250,6 +305,10 @@ def build_media_fetcher() -> Optional[WhatsAppMediaFetcher]:
         access_token=token,
         api_version=os.getenv("WHATSAPP_API_VERSION", "v22.0"),
     )
+
+
+def build_media_fetcher_for_message(media_id: str) -> Optional[WhatsAppMediaFetcher]:
+    return build_media_fetcher()
 
 
 def run_whatsapp_loop(
