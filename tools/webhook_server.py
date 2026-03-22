@@ -190,7 +190,7 @@ def extract_message(data: Dict[str, Any]) -> Optional[StoredMessage]:
 
 
 def create_webhook_app(db_path: Optional[Path] = None) -> Flask:
-    """Create Flask app for WhatsApp webhook."""
+    """Create Flask app for WhatsApp and MercadoPago webhooks."""
     if Flask is None or jsonify is None or request is None:
         raise ImportError(
             "Flask is required to run the WhatsApp webhook server."
@@ -250,6 +250,38 @@ def create_webhook_app(db_path: Optional[Path] = None) -> Flask:
         except Exception as e:
             logger.error(f"Error processing webhook: {e}")
             return jsonify({"error": str(e)}), 500
+
+    # ------------------------------------------------------------------
+    # MercadoPago webhook
+    # ------------------------------------------------------------------
+
+    @app.route("/webhooks/mercadopago", methods=["POST"])
+    def mp_webhook():
+        """Receive and process MercadoPago subscription events."""
+        from tools.payment_webhook import PaymentWebhookTool
+
+        payload = request.get_json(silent=True) or {}
+        data_id = (payload.get("data") or {}).get("id", "")
+
+        # Validate HMAC signature when secret is configured
+        x_sig = request.headers.get("x-signature", "")
+        x_req_id = request.headers.get("x-request-id", "")
+        if x_sig:
+            parts = dict(item.split("=", 1) for item in x_sig.split(",") if "=" in item)
+            ts = parts.get("ts", "")
+            v1 = parts.get("v1", "")
+            tool = PaymentWebhookTool()
+            if not tool.validate_signature(data_id, x_req_id, ts, v1):
+                logger.warning("Invalid MercadoPago webhook signature")
+                return "Unauthorized", 401
+
+        try:
+            result = PaymentWebhookTool().process_webhook(payload)
+            logger.info(f"MP webhook processed: {result}")
+            return "", 200
+        except Exception as e:
+            logger.error(f"Error processing MP webhook: {e}")
+            return "", 200  # Always return 200 to prevent MP retries on our bugs
 
     @app.route("/health", methods=["GET"])
     def health():

@@ -182,13 +182,13 @@ class WhatsAppAgentLoop:
         base_prompt = body or caption
 
         if msg_type == "image" and media_id:
-            analysis = self._analyze_image(media_id=media_id, caption=caption)
+            analysis = self._analyze_image(media_id=media_id, caption=caption, sender=sender)
             if analysis:
                 base_prompt = analysis
             else:
                 base_prompt = caption or "Analyze this image."
         elif msg_type in {"audio", "voice"} and media_id:
-            transcript = self._transcribe_audio(media_id=media_id)
+            transcript = self._transcribe_audio(media_id=media_id, sender=sender)
             if transcript:
                 base_prompt = transcript
             else:
@@ -196,7 +196,7 @@ class WhatsAppAgentLoop:
 
         return f"<system>The user's verified phone number is: +{sender}</system>\n{base_prompt}"
 
-    def _transcribe_audio(self, media_id: str) -> str:
+    def _transcribe_audio(self, media_id: str, sender: str = "") -> str:
         if not self.media_fetcher:
             return ""
 
@@ -207,10 +207,10 @@ class WhatsAppAgentLoop:
             return ""
 
         try:
-            result = self.agent.tool_registry.call_tool(
-                "transcribe_audio",
-                {"audio_path": str(audio_path)},
-            )
+            args: Dict[str, Any] = {"audio_path": str(audio_path)}
+            if sender:
+                args["phone_number"] = f"+{sender}"
+            result = self.agent.tool_registry.call_tool("transcribe_audio", args)
         except Exception as exc:
             logger.error("Failed to transcribe WhatsApp audio %s: %s", media_id, exc)
             return ""
@@ -230,7 +230,7 @@ class WhatsAppAgentLoop:
             return f"Audio transcription for WhatsApp media {media_id}:\n{text}"
         return ""
 
-    def _analyze_image(self, media_id: str, caption: str = "") -> str:
+    def _analyze_image(self, media_id: str, caption: str = "", sender: str = "") -> str:
         if not self.media_fetcher:
             return ""
 
@@ -246,7 +246,7 @@ class WhatsAppAgentLoop:
             "Keep the response concise but useful."
         )
 
-        result = self._run_vision_pipeline(image_path=image_path, prompt=prompt)
+        result = self._run_vision_pipeline(image_path=image_path, prompt=prompt, sender=sender)
         if not result:
             return ""
 
@@ -255,21 +255,22 @@ class WhatsAppAgentLoop:
             return f"{header}\n\nSender caption: {caption}"
         return header
 
-    def _run_vision_pipeline(self, image_path: Path, prompt: str) -> str:
+    def _run_vision_pipeline(self, image_path: Path, prompt: str, sender: str = "") -> str:
         vision_prompts = [
             "Use OpenAI vision to analyze the image at {path}. {prompt}",
             "Use Gemini vision to analyze the image at {path}. {prompt}",
         ]
         for template in vision_prompts:
-            result = self._call_vision_prompt(template, image_path, prompt)
+            result = self._call_vision_prompt(template, image_path, prompt, sender=sender)
             if result:
                 return result
         return ""
 
-    def _call_vision_prompt(self, template: str, image_path: Path, prompt: str) -> str:
+    def _call_vision_prompt(self, template: str, image_path: Path, prompt: str, sender: str = "") -> str:
+        phone_context = f"<system>The user's verified phone number is: +{sender}</system>\n" if sender else ""
         try:
             result = self.agent.invoke(
-                template.format(path=image_path, prompt=prompt),
+                phone_context + template.format(path=image_path, prompt=prompt),
                 chat_history=[],
             )
         except Exception as exc:
@@ -334,7 +335,7 @@ def run_whatsapp_loop(
     repo_root = (repo_root or Path(__file__).resolve().parent.parent).resolve()
     _load_env(repo_root)
 
-    from tools.whatsapp_webhook import get_message_store
+    from tools.webhook_server import get_message_store
 
     agent = MCPJoseLangChainAgent(
         repo_root=repo_root,

@@ -393,7 +393,7 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
     @mcp.tool()
     def get_ws_messages(limit: int = 10, since: Optional[str] = None) -> Dict[str, Any]:
         try:
-            from tools.whatsapp_webhook import get_message_store
+            from tools.webhook_server import get_message_store
             store = get_message_store()
             messages = store.get_recent(limit=limit, since=since)
             return {"ok": True, "messages": [m.to_dict() for m in messages], "count": len(messages)}

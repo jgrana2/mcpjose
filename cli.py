@@ -306,19 +306,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     webhook_parser = subparsers.add_parser(
-        "whatsapp-webhook", help="Run WhatsApp webhook server to receive messages"
+        "webhook", help="Run webhook server (WhatsApp + MercadoPago)"
     )
-    webhook_parser.add_argument(
-        "--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)"
-    )
-    webhook_parser.add_argument(
-        "--port", type=int, default=5000, help="Port to bind to (default: 5000)"
-    )
-    webhook_parser.add_argument(
-        "--db-path",
-        default=None,
-        help="Path to SQLite database (default: auth/whatsapp_messages.sqlite)",
-    )
+    webhook_parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
+    webhook_parser.add_argument("--port", type=int, default=5000, help="Port to bind to (default: 5000)")
+    webhook_parser.add_argument("--db-path", default=None, help="Path to SQLite database")
+
+
 
     return parser
 
@@ -356,16 +350,16 @@ def main() -> int:
         tool_help.print_help()
         return 1
 
-    if args.command == "whatsapp-webhook":
-        from tools.whatsapp_webhook import run_webhook_server
+    if args.command == "webhook":
+        from tools.webhook_server import run_webhook_server
 
-        db_path = Path(args.db_path) if args.db_path else None
+        db_path = Path(args.db_path) if getattr(args, "db_path", None) else None
 
-        print(f"Starting WhatsApp webhook server on {args.host}:{args.port}")
+        print(f"Starting webhook server on {args.host}:{args.port}")
         print(f"Database: {db_path or 'auth/whatsapp_messages.sqlite'}")
-        print("\nConfigure webhook URL in Meta Developer dashboard:")
-        print("  https://your-domain/webhook")
-        print("\nVerify token (set in WHATSAPP_WEBHOOK_VERIFY_TOKEN env var)")
+        print("\nRoutes:")
+        print("  WhatsApp  →  GET/POST https://your-domain/webhook")
+        print("  MercadoPago → POST  https://your-domain/webhooks/mercadopago")
         print("\nPress Ctrl+C to stop")
 
         try:
