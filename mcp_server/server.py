@@ -87,3 +87,22 @@ mcp = create_server()
 
 if __name__ == "__main__":
     mcp.run()
+
+# Import and attach our new subscription-aware logic
+try:
+    from mcp_server.server_patch import add_guard_to_tools
+    from core.http_client import HTTPClient
+    from tools.payment_gateway import PaymentGatewayTool
+    from tools.payment_webhook import PaymentWebhookTool
+
+    # In a full integration, these tools would be added to the ProjectToolRegistry
+    # For now, we manually register them on the MCP object
+    add_guard_to_tools(mcp)
+    
+    # We could also register the tools here manually if they aren't in registry:
+    # This requires adapting the execute method to FastMCP's @tool decorator logic
+    # or adding them to the Custom Tool logic inside tool_registry.py
+
+except ImportError as e:
+    logger.warning(f"Could not load payment tools: {e}")
+
