@@ -338,8 +338,21 @@ class ProjectToolRegistry:
         prompt: str,
         output_path: Optional[str] = None,
         image_path: Optional[str] = None,
+        phone_number: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Generate or edit an image with Gemini."""
+        """Generate or edit an image with Gemini. (Premium Tool)"""
+        target_number = phone_number or os.getenv("WHATSAPP_DEFAULT_DESTINATION", "")
+        if target_number:
+            # Normalize it to ensure we check the DB correctly
+            target_number = f"+{_normalize_e164ish(target_number)}"
+
+            from core.guard import SubscriptionGuard
+
+            guard = SubscriptionGuard()
+            access_error = guard.check_access(target_number)
+            if access_error:
+                return {"error": access_error}
+
         try:
             provider = ProviderFactory.create_image_generator("gemini")
             return provider.generate(prompt, output_path, image_path)
