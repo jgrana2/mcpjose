@@ -67,7 +67,9 @@ class WhatsAppMediaFetcher:
 
         http = HTTPClient()
         http.session.headers.update({"Authorization": f"Bearer {self.access_token}"})
-        meta = http.get(f"https://graph.facebook.com/{self.api_version}/{media_id}").json()
+        meta = http.get(
+            f"https://graph.facebook.com/{self.api_version}/{media_id}"
+        ).json()
         url = meta.get("url")
         if not url:
             raise RuntimeError("WhatsApp media URL not found")
@@ -93,7 +95,9 @@ class WhatsAppMediaFetcher:
     def fetch_image(self, media_id: str, output_dir: Optional[Path] = None) -> Path:
         path = self.fetch_media(media_id, output_dir=output_dir)
         if path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
-            raise RuntimeError(f"Unsupported image format for vision: {path.suffix or path.name}")
+            raise RuntimeError(
+                f"Unsupported image format for vision: {path.suffix or path.name}"
+            )
         return path
 
 
@@ -173,20 +177,24 @@ class WhatsAppAgentLoop:
         caption = (getattr(message, "caption", "") or "").strip()
         msg_type = getattr(message, "type", "")
         media_id = getattr(message, "media_id", None)
+        sender = _normalize_number(message.from_number)
+
+        base_prompt = body or caption
 
         if msg_type == "image" and media_id:
             analysis = self._analyze_image(media_id=media_id, caption=caption)
             if analysis:
-                return analysis
-            return caption or "Analyze this image."
-
-        if msg_type in {"audio", "voice"} and media_id:
+                base_prompt = analysis
+            else:
+                base_prompt = caption or "Analyze this image."
+        elif msg_type in {"audio", "voice"} and media_id:
             transcript = self._transcribe_audio(media_id=media_id)
             if transcript:
-                return transcript
-            return caption or "Transcribe this audio message."
+                base_prompt = transcript
+            else:
+                base_prompt = caption or "Transcribe this audio message."
 
-        return body or caption
+        return f"<system>The user's verified phone number is: +{sender}</system>\n{base_prompt}"
 
     def _transcribe_audio(self, media_id: str) -> str:
         if not self.media_fetcher:
@@ -212,7 +220,9 @@ class WhatsAppAgentLoop:
             if error:
                 logger.error("WhatsApp audio transcription returned error: %s", error)
                 return ""
-            text = result.get("text") or result.get("transcript") or result.get("output")
+            text = (
+                result.get("text") or result.get("transcript") or result.get("output")
+            )
             if isinstance(text, str) and text.strip():
                 return f"Audio transcription for WhatsApp media {media_id}:\n{text.strip()}"
         text = str(result).strip()
