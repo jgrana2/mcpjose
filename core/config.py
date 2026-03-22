@@ -20,6 +20,15 @@ class Config:
     google_credentials_path: Optional[Path] = None
     google_project_id: Optional[str] = None
 
+    # MercadoPago
+    mp_access_token: Optional[str] = None
+    mp_public_key: Optional[str] = None
+    mp_webhook_secret: Optional[str] = None
+    mp_plan_amount: str = "49000"
+    mp_currency: str = "COP"
+    mp_plan_reason: str = "Premium Tools Subscription"
+    mp_back_url: str = "https://mcpjose.com"
+
     # Search
     search_backend: str = "ddgs"
 
@@ -93,6 +102,13 @@ class CredentialManager:
             else None,
             google_project_id=google_project_id or os.environ.get("GOOGLE_PROJECT_ID"),
             search_backend=os.environ.get("SEARCH_ENGINE", "ddgs").lower(),
+            mp_access_token=os.environ.get("MP_ACCESS_TOKEN"),
+            mp_public_key=os.environ.get("MP_PUBLIC_KEY"),
+            mp_webhook_secret=os.environ.get("MP_WEBHOOK_SECRET"),
+            mp_plan_amount=os.environ.get("MP_PLAN_AMOUNT", "49000"),
+            mp_currency=os.environ.get("MP_CURRENCY", "COP"),
+            mp_plan_reason=os.environ.get("MP_PLAN_REASON", "Premium Tools Subscription"),
+            mp_back_url=os.environ.get("MP_BACK_URL", "https://mcpjose.com"),
             repo_root=repo_root,
         )
 
@@ -129,6 +145,34 @@ class CredentialManager:
         return {
             "project_id": config.google_project_id,
             "credentials_path": config.google_credentials_path,
+        }
+
+    def get_api_key(self, service: str) -> Optional[str]:
+        """Generic API key lookup by service name.
+
+        Supports: 'openai', 'google', 'mercadopago'
+        """
+        mapping = {
+            "openai": "openai_api_key",
+            "google": "google_api_key",
+            "mercadopago": "mp_access_token",
+        }
+        attr = mapping.get(service.lower())
+        if attr:
+            return getattr(self.get_config(), attr, None)
+        return os.environ.get(service.upper())
+
+    def get_mercadopago_config(self) -> Dict[str, Any]:
+        """Return all MercadoPago configuration values."""
+        cfg = self.get_config()
+        return {
+            "access_token": cfg.mp_access_token,
+            "public_key": cfg.mp_public_key,
+            "webhook_secret": cfg.mp_webhook_secret,
+            "plan_amount": float(cfg.mp_plan_amount or "0"),
+            "currency": cfg.mp_currency,
+            "plan_reason": cfg.mp_plan_reason,
+            "back_url": cfg.mp_back_url,
         }
 
 
