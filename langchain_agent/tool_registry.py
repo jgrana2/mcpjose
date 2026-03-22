@@ -23,6 +23,7 @@ from tools.code_editor import (
     _cmd_undo,
     _cmd_view,
 )
+from tools.bash_executor import BashExecutor
 from tools.filesystem import FilesystemTools
 from tools.navigation import extract_html_content, extract_pdf_content
 from tools.whatsapp import WhatsAppCloudAPIClient, WhatsAppSendResult
@@ -90,6 +91,61 @@ class ProjectToolRegistry:
         self._skills_cache: Optional[Dict[str, SkillDocument]] = None
         self._ws_limiter: Optional[DailyRateLimiter] = None
         self._undo_stack: Dict[str, list[str]] = {}
+
+        # Lazy-loaded premium access helpers
+        self._guard = None
+        self._payment_gateway = None
+
+    def _get_guard(self):
+        if self._guard is None:
+            from core.guard import SubscriptionGuard
+            self._guard = SubscriptionGuard()
+        return self._guard
+
+    def _get_payment_gateway(self):
+        if self._payment_gateway is None:
+            from tools.payment_gateway import PaymentGatewayTool
+            self._payment_gateway = PaymentGatewayTool()
+        return self._payment_gateway
+
+    def _check_premium_access(self, phone_number: Optional[str]) -> Optional[Dict[str, str]]:
+        """Return an error dict if the user lacks an active subscription, else None.
+
+        Generates a checkout link and embeds it in the denial message so users
+        know exactly where to subscribe.
+        """
+        target = phone_number or os.getenv("WHATSAPP_DEFAULT_DESTINATION", "")
+        if not target:
+            return None  # No phone context — allow (non-WhatsApp callers)
+
+        normalized = f"+{_normalize_e164ish(target)}"
+        checkout_url = None
+        try:
+            result = self._get_payment_gateway().create_checkout_link(normalized)
+            checkout_url = result.get("init_point")
+        except Exception:
+            pass
+
+        error_msg = self._get_guard().check_access(normalized, checkout_url=checkout_url)
+        if error_msg:
+            return {"error": error_msg}
+        return None
+
+    def mp_create_checkout_link(
+        self,
+        phone_number: str,
+        payer_email: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a MercadoPago checkout link for the provided phone number."""
+        normalized = f"+{_normalize_e164ish(phone_number)}"
+        return self._get_payment_gateway().create_checkout_link(
+            normalized,
+            payer_email=payer_email,
+        )
+
+    def mp_cancel_subscription(self, subscription_id: str) -> Dict[str, Any]:
+        """Cancel a MercadoPago subscription by preapproval id."""
+        return self._get_payment_gateway().cancel_subscription(subscription_id)
 
     # Context / Skills tools
     def read_agents_md(self, max_chars: int = 16000) -> Dict[str, Any]:
@@ -271,8 +327,11 @@ class ProjectToolRegistry:
         }
 
     # AI tools
-    def call_llm(self, prompt: str) -> Dict[str, str]:
+    def call_llm(self, prompt: str, phone_number: Optional[str] = None) -> Dict[str, str]:
         """Generate text with the OpenAI LLM provider."""
+        access_error = self._check_premium_access(phone_number)
+        if access_error:
+            return access_error
         try:
             provider = ProviderFactory.create_llm("openai")
             return {"text": provider.complete(prompt)}
@@ -286,8 +345,12 @@ class ProjectToolRegistry:
         ocr_context: Optional[str] = None,
         ocr_file: Optional[str] = None,
         model: Optional[str] = None,
+        phone_number: Optional[str] = None,
     ) -> Dict[str, str]:
         """Process images/PDF pages with OpenAI vision."""
+        access_error = self._check_premium_access(phone_number)
+        if access_error:
+            return access_error
         if ocr_file:
             ocr_path = Path(ocr_file)
             if not ocr_path.exists():
@@ -313,8 +376,12 @@ class ProjectToolRegistry:
         ocr_context: Optional[str] = None,
         ocr_file: Optional[str] = None,
         model: Optional[str] = None,
+        phone_number: Optional[str] = None,
     ) -> Dict[str, str]:
         """Process images/PDF pages with Gemini vision."""
+        access_error = self._check_premium_access(phone_number)
+        if access_error:
+            return access_error
         if ocr_file:
             ocr_path = Path(ocr_file)
             if not ocr_path.exists():
@@ -341,18 +408,9 @@ class ProjectToolRegistry:
         phone_number: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate or edit an image with Gemini. (Premium Tool)"""
-        target_number = phone_number or os.getenv("WHATSAPP_DEFAULT_DESTINATION", "")
-        if target_number:
-            # Normalize it to ensure we check the DB correctly
-            target_number = f"+{_normalize_e164ish(target_number)}"
-
-            from core.guard import SubscriptionGuard
-
-            guard = SubscriptionGuard()
-            access_error = guard.check_access(target_number)
-            if access_error:
-                return {"error": access_error}
-
+        access_error = self._check_premium_access(phone_number)
+        if access_error:
+            return access_error
         try:
             provider = ProviderFactory.create_image_generator("gemini")
             return provider.generate(prompt, output_path, image_path)
@@ -364,8 +422,12 @@ class ProjectToolRegistry:
         input_file: str,
         file_type: Optional[str] = None,
         output: Optional[str] = None,
+        phone_number: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Extract OCR text from image or PDF using Google Vision."""
+        access_error = self._check_premium_access(phone_number)
+        if access_error:
+            return access_error
         try:
             provider = ProviderFactory.create_ocr("google")
             annotations = provider.extract_text(input_file, file_type)
@@ -385,8 +447,12 @@ class ProjectToolRegistry:
         response_format: str = "text",
         timestamp_granularities: Optional[list[str]] = None,
         prompt: Optional[str] = None,
+        phone_number: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Transcribe audio with OpenAI transcription models."""
+        access_error = self._check_premium_access(phone_number)
+        if access_error:
+            return access_error
         try:
             provider = ProviderFactory.create_transcription("openai")
             kwargs: Dict[str, Any] = {
@@ -623,7 +689,7 @@ class ProjectToolRegistry:
     ) -> Dict[str, Any]:
         """Retrieve recent WhatsApp webhook messages from local storage."""
         try:
-            from tools.whatsapp_webhook import get_message_store
+            from tools.webhook_server import get_message_store
 
             store = get_message_store()
             messages = store.get_recent(limit=limit, since=since)
@@ -711,9 +777,31 @@ class ProjectToolRegistry:
             "error": f"Unknown command '{command}'. Use: view, create, str_replace, insert, undo_edit."
         }
 
+    def bash_execute(
+        self,
+        command: str,
+        cwd: Optional[str] = None,
+        timeout: int = 30,
+    ) -> Dict[str, Any]:
+        """Execute a bash command and return stdout, stderr, and return code."""
+        try:
+            return BashExecutor().execute(command, cwd=cwd, timeout=timeout)
+        except Exception as exc:
+            return {"ok": False, "error": f"bash_execute failed: {exc}"}
+
     def tool_specs(self) -> list[tuple[str, str, Any]]:
         """Return the canonical shared tool definitions."""
         return [
+            (
+                "mp_create_checkout_link",
+                "Generate a MercadoPago Checkout Pro subscription link for a phone number.",
+                self.mp_create_checkout_link,
+            ),
+            (
+                "mp_cancel_subscription",
+                "Cancel a MercadoPago subscription by preapproval id.",
+                self.mp_cancel_subscription,
+            ),
             ("search", "Search the web using configured search backend.", self.search),
             (
                 "navigate_to_url",
@@ -804,6 +892,11 @@ class ProjectToolRegistry:
                 "str_replace_editor",
                 "View, create, and edit local files (commands: view, create, str_replace, insert, undo_edit).",
                 self.str_replace_editor,
+            ),
+            (
+                "bash_execute",
+                "Run a bash command and capture stdout, stderr, and return code.",
+                self.bash_execute,
             ),
             ("read_agents_md", "Read AGENTS.md instructions.", self.read_agents_md),
             ("list_skills", "List all discovered project skills.", self.list_skills),

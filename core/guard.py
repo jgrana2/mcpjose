@@ -57,12 +57,15 @@ class SubscriptionGuard:
             logger.error(f"Database error in SubscriptionGuard: {e}")
             return False
 
-    def check_access(self, phone_number: str) -> str:
+    def check_access(self, phone_number: str, checkout_url: Optional[str] = None) -> str:
         """
-        Returns an empty string if access is allowed, 
-        or an error message if access is denied.
+        Returns an empty string if access is allowed,
+        or an error message (with subscribe link when available) if access is denied.
         """
         if self.is_authorized(phone_number):
             return ""
-        
-        return "Access Denied: You do not have an active subscription. Please renew your plan to continue using premium features."
+
+        msg = "Access Denied: You do not have an active subscription. Please renew your plan to continue using premium features."
+        if checkout_url:
+            msg += f"\n\nSubscribe here: {checkout_url}"
+        return msg
