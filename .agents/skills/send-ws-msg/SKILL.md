@@ -118,6 +118,57 @@ WhatsApp Cloud API has file size limits. Large images (especially high-resolutio
 - `Missing destination`: provide a `destination` parameter or set `WHATSAPP_DEFAULT_DESTINATION`.
 - `Daily rate limit exceeded`: increase `WHATSAPP_DAILY_MAX` or wait until the next local day.
 - `Provide either a local media path or media_url, not both.`: choose one media source.
+
+---
+
+## Receiving Files & Media
+
+When users send files, images, audio, or video to the WhatsApp number, the webhook stores them in the local SQLite database. The agent loop automatically processes incoming media:
+
+- **Images** → analyzed via vision pipeline (OpenAI/Gemini)
+- **Audio/Voice** → transcribed via Whisper
+- **Documents** (PDF, DOCX, XLSX, TXT, CSV, etc.) → downloaded and content extracted where possible; file path provided to the agent for further tool-based processing
+- **Video** → downloaded and file path provided to the agent
+
+### Stored message fields
+
+Messages from `get_ws_messages` now include:
+- `media_id`: WhatsApp media ID (use with `download_ws_media` to download)
+- `media_type`: one of `image`, `audio`, `video`, `document`
+- `filename`: original filename (documents only)
+
+### Tool: `download_ws_media`
+
+Download any received WhatsApp media file by its `media_id`.
+
+#### Inputs
+- `media_id` (string, required): the WhatsApp media ID from a received message
+- `output_dir` (string | null): optional local directory to save the file (defaults to temp dir)
+
+#### Output
+```json
+{
+  "ok": true,
+  "media_id": "123456789",
+  "file_path": "/tmp/whatsapp_123456789_report.pdf",
+  "file_size_bytes": 204800
+}
+```
+
+#### Workflow: Processing a received document
+1. Call `get_ws_messages` to see recent messages
+2. Find a message with `type: "document"` and note its `media_id` and `filename`
+3. Call `download_ws_media` with the `media_id`
+4. Use the returned `file_path` with other tools (read_file, google_ocr, bash_execute, etc.)
+
+#### Example
+```json
+{ "media_id": "1234567890" }
+```
+
+```json
+{ "media_id": "1234567890", "output_dir": "/tmp/downloads" }
+```
 - `File not found`: verify the local media path exists.
 - `WhatsApp media upload did not return an id`: check the upload response and Media API permissions.
 - `(#100) Invalid parameter`: image file may be too large. Resize/compress before sending (see Image Size Optimization section above).

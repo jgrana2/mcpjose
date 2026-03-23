@@ -61,3 +61,5 @@ accounts.db
 .gemini/settings.json
 data/
 server_log.txt
+.playwright-cli/
+output/

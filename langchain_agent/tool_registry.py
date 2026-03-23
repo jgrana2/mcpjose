@@ -9,6 +9,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import unquote_plus
 from zoneinfo import ZoneInfo
 
 from core.config import get_config
@@ -235,6 +236,21 @@ class ProjectToolRegistry:
         except Exception as exc:
             return {"error": f"x_search failed: {exc}", "topic": topic}
 
+    def x_trends_colombia(self, limit: int = 20) -> Dict[str, Any]:
+        """Retrieve ranked X/Twitter trends for Colombia using twscrape."""
+        safe_limit = max(1, min(limit, 50))
+        try:
+            return _run_async_from_sync(
+                lambda: self._x_trends_colombia_async(limit=safe_limit)
+            )
+        except Exception as exc:
+            return {
+                "error": f"x_trends_colombia failed: {exc}",
+                "country": "Colombia",
+                "woeid": 368148,
+                "limit": safe_limit,
+            }
+
     async def _x_search_async(self, topic: str) -> Dict[str, Any]:
         stop_words = {
             "a",
@@ -325,6 +341,164 @@ class ProjectToolRegistry:
             "count": len(posts),
             "topic": topic,
             "search_query": search_query,
+        }
+
+    async def _x_trends_colombia_async(self, limit: int = 20) -> Dict[str, Any]:
+        country = "Colombia"
+        woeid = 368148
+
+        try:
+            from twscrape import API
+            from twscrape.queue_client import QueueClient
+        except Exception as exc:
+            return {
+                "error": f"twscrape is unavailable: {exc}",
+                "country": country,
+                "woeid": woeid,
+                "limit": limit,
+            }
+
+        api = API()
+        username = os.getenv("TWSCRAPE_USERNAME")
+        password = os.getenv("TWSCRAPE_PASSWORD")
+        email = os.getenv("TWSCRAPE_EMAIL_TWO")
+        api_key = os.getenv("TWSCRAPE_API_KEY")
+        cookies_str = os.getenv("TWSCRAPE_COOKIES")
+        if not all([username, password, email, api_key, cookies_str]):
+            return {
+                "error": "Missing required TwScrape environment variables.",
+                "country": country,
+                "woeid": woeid,
+                "limit": limit,
+            }
+
+        await api.pool.add_account(
+            username, password, email, api_key, cookies=cookies_str
+        )
+
+        endpoint_error: Optional[str] = None
+        try:
+            endpoint_url = "https://api.twitter.com/1.1/trends/place.json"
+            params = {"id": woeid}
+            async with QueueClient(api.pool, queue="TrendsPlace", proxy=api.proxy) as client:
+                response = await client.get(endpoint_url, params=params)
+
+            if response is not None:
+                payload = response.json()
+                normalized = self._normalize_v1_trends(payload=payload, limit=limit)
+                if normalized:
+                    metadata = payload[0] if isinstance(payload, list) and payload else {}
+                    locations = metadata.get("locations") or []
+                    return {
+                        "country": country,
+                        "woeid": woeid,
+                        "count": len(normalized),
+                        "trends": normalized,
+                        "as_of": metadata.get("as_of"),
+                        "created_at": metadata.get("created_at"),
+                        "locations": locations,
+                        "source": "twscrape_v1_trends_place",
+                        "endpoint": endpoint_url,
+                    }
+
+            endpoint_error = (
+                "Empty trends payload from trends/place endpoint."
+                if response is not None
+                else "No response from trends/place endpoint."
+            )
+        except Exception as exc:
+            endpoint_error = str(exc)
+
+        fallback: list[Dict[str, Any]] = []
+        try:
+            async for trend in api.trends("trending", limit=limit):
+                fallback.append(self._normalize_graphql_trend(trend, len(fallback) + 1))
+                if len(fallback) >= limit:
+                    break
+        except Exception as exc:
+            return {
+                "error": f"Failed to fetch trends for {country}: {exc}",
+                "country": country,
+                "woeid": woeid,
+                "limit": limit,
+                "endpoint_error": endpoint_error,
+            }
+
+        return {
+            "country": country,
+            "woeid": woeid,
+            "count": len(fallback),
+            "trends": fallback,
+            "source": "twscrape_graphql_trending_fallback",
+            "note": (
+                "Fallback uses GraphQL trending timeline and may reflect account locale "
+                "instead of strictly Colombia."
+            ),
+            "endpoint_error": endpoint_error,
+        }
+
+    def _normalize_v1_trends(self, payload: Any, limit: int) -> list[Dict[str, Any]]:
+        if not isinstance(payload, list) or not payload:
+            return []
+
+        first = payload[0]
+        if not isinstance(first, dict):
+            return []
+
+        raw_trends = first.get("trends")
+        if not isinstance(raw_trends, list):
+            return []
+
+        normalized: list[Dict[str, Any]] = []
+        for idx, trend in enumerate(raw_trends, start=1):
+            if not isinstance(trend, dict):
+                continue
+
+            query = trend.get("query")
+            decoded_query = unquote_plus(query) if isinstance(query, str) else None
+
+            normalized.append(
+                {
+                    "rank": idx,
+                    "name": trend.get("name"),
+                    "tweet_volume": trend.get("tweet_volume"),
+                    "query": decoded_query,
+                    "raw_query": query,
+                    "url": trend.get("url"),
+                    "promoted_content": trend.get("promoted_content"),
+                }
+            )
+            if len(normalized) >= limit:
+                break
+
+        return normalized
+
+    def _normalize_graphql_trend(self, trend: Any, rank: int) -> Dict[str, Any]:
+        query = None
+        options = getattr(getattr(trend, "trend_url", None), "urlEndpointOptions", [])
+        if isinstance(options, list):
+            for item in options:
+                if getattr(item, "key", None) == "q":
+                    query = unquote_plus(str(getattr(item, "value", "")))
+                    break
+
+        grouped_names = []
+        grouped = getattr(trend, "grouped_trends", [])
+        if isinstance(grouped, list):
+            grouped_names = [getattr(item, "name", None) for item in grouped if item]
+
+        metadata = getattr(trend, "trend_metadata", None)
+        return {
+            "rank": getattr(trend, "rank", None) or rank,
+            "name": getattr(trend, "name", None),
+            "tweet_volume": None,
+            "query": query,
+            "raw_query": None,
+            "url": getattr(getattr(trend, "trend_url", None), "url", None),
+            "promoted_content": None,
+            "domain_context": getattr(metadata, "domain_context", None),
+            "meta_description": getattr(metadata, "meta_description", None),
+            "grouped_topics": grouped_names,
         }
 
     # AI tools
@@ -708,6 +882,40 @@ class ProjectToolRegistry:
         except Exception as exc:
             return {"ok": False, "messages": [], "count": 0, "error": str(exc)}
 
+    def download_ws_media(
+        self,
+        media_id: str,
+        output_dir: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Download a WhatsApp media file (image, audio, video, or document) by its media_id.
+
+        The file is downloaded from the WhatsApp Cloud API and saved locally.
+        Use `get_ws_messages` first to find the media_id of a received file.
+
+        Args:
+            media_id: The WhatsApp media ID from a received message.
+            output_dir: Optional local directory to save the file. Defaults to a temp directory.
+        """
+        try:
+            from langchain_agent.whatsapp_runner import build_media_fetcher
+
+            fetcher = build_media_fetcher()
+            if not fetcher:
+                return {
+                    "ok": False,
+                    "error": "WHATSAPP_ACCESS_TOKEN not configured.",
+                }
+            out_path = Path(output_dir) if output_dir else None
+            file_path = fetcher.fetch_media(media_id, output_dir=out_path)
+            return {
+                "ok": True,
+                "media_id": media_id,
+                "file_path": str(file_path),
+                "file_size_bytes": file_path.stat().st_size,
+            }
+        except Exception as exc:
+            return {"ok": False, "media_id": media_id, "error": str(exc)}
+
     # Filesystem tools
     def read_file(
         self,
@@ -820,6 +1028,11 @@ class ProjectToolRegistry:
                 "Search X/Twitter posts using deterministic keyword matching.",
                 self.x_search,
             ),
+            (
+                "x_trends_colombia",
+                "Get ranked X/Twitter trending topics for Colombia using twscrape.",
+                self.x_trends_colombia,
+            ),
             ("call_llm", "Generate text using OpenAI LLM provider.", self.call_llm),
             (
                 "openai_vision_tool",
@@ -866,6 +1079,11 @@ class ProjectToolRegistry:
                 "get_ws_messages",
                 "Read recent WhatsApp webhook messages from local storage.",
                 self.get_ws_messages,
+            ),
+            (
+                "download_ws_media",
+                "Download a WhatsApp media file (image, audio, video, document) by media_id.",
+                self.download_ws_media,
             ),
             (
                 "read_file",

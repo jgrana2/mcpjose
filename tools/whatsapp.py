@@ -318,3 +318,22 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
     @mcp.tool()
     def get_ws_messages(limit: int = 10, since: Optional[str] = None) -> Dict[str, Any]:
         return registry.get_ws_messages(limit=limit, since=since)
+
+    @mcp.tool()
+    def download_ws_media(
+        media_id: str,
+        output_dir: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Download a WhatsApp media file (image, audio, video, or document) by its media_id.
+
+        The file is downloaded from the WhatsApp Cloud API and saved locally.
+        Use `get_ws_messages` first to find the media_id of a received file.
+
+        Args:
+            media_id: The WhatsApp media ID from a received message.
+            output_dir: Optional local directory to save the file.
+        """
+        return registry.download_ws_media(
+            media_id=media_id,
+            output_dir=output_dir,
+        )

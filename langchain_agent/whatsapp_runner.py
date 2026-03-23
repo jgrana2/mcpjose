@@ -62,7 +62,12 @@ class WhatsAppMediaFetcher:
     access_token: str
     api_version: str = "v22.0"
 
-    def fetch_media(self, media_id: str, output_dir: Optional[Path] = None) -> Path:
+    def fetch_media(
+        self,
+        media_id: str,
+        output_dir: Optional[Path] = None,
+        filename: Optional[str] = None,
+    ) -> Path:
         from core.http_client import HTTPClient
 
         http = HTTPClient()
@@ -77,6 +82,13 @@ class WhatsAppMediaFetcher:
         out_dir = output_dir or Path(tempfile.gettempdir())
         out_dir.mkdir(parents=True, exist_ok=True)
         mime_type = meta.get("mime_type", "application/octet-stream")
+
+        # If caller provided the original filename, use it directly
+        if filename:
+            path = out_dir / f"whatsapp_{media_id}_{filename}"
+            path.write_bytes(resp.content)
+            return path
+
         extension = {
             "audio/ogg": ".ogg",
             "audio/mpeg": ".mp3",
@@ -85,7 +97,18 @@ class WhatsAppMediaFetcher:
             "video/mp4": ".mp4",
             "image/jpeg": ".jpg",
             "image/png": ".png",
+            "image/webp": ".webp",
             "application/pdf": ".pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+            "application/msword": ".doc",
+            "application/vnd.ms-excel": ".xls",
+            "application/vnd.ms-powerpoint": ".ppt",
+            "text/plain": ".txt",
+            "text/csv": ".csv",
+            "application/zip": ".zip",
+            "application/json": ".json",
         }.get(mime_type, "")
         safe_mime = mime_type.replace("/", "_")
         path = out_dir / f"whatsapp_{media_id}_{safe_mime}{extension}"
@@ -193,6 +216,25 @@ class WhatsAppAgentLoop:
                 base_prompt = transcript
             else:
                 base_prompt = caption or "Transcribe this audio message."
+        elif msg_type == "document" and media_id:
+            doc_info = self._process_document(
+                media_id=media_id,
+                caption=caption,
+                sender=sender,
+                message=message,
+            )
+            if doc_info:
+                base_prompt = doc_info
+            else:
+                base_prompt = caption or "A document was sent but could not be processed."
+        elif msg_type == "video" and media_id:
+            filename = getattr(message, "filename", None)
+            base_prompt = self._describe_received_media(
+                media_id=media_id,
+                media_type="video",
+                caption=caption,
+                filename=filename,
+            )
 
         return f"<system>The user's verified phone number is: +{sender}</system>\n{base_prompt}"
 
@@ -282,6 +324,87 @@ class WhatsAppAgentLoop:
             if isinstance(output, str) and output.strip():
                 return output.strip()
         return str(result).strip()
+
+    def _process_document(
+        self,
+        media_id: str,
+        caption: str = "",
+        sender: str = "",
+        message: Any = None,
+    ) -> str:
+        """Download a document from WhatsApp and build a prompt with its content."""
+        if not self.media_fetcher:
+            return ""
+
+        filename = getattr(message, "filename", None) if message else None
+
+        try:
+            file_path = self.media_fetcher.fetch_media(
+                media_id, filename=filename,
+            )
+        except Exception as exc:
+            logger.error("Failed to fetch WhatsApp document %s: %s", media_id, exc)
+            return ""
+
+        suffix = file_path.suffix.lower()
+        content_summary = ""
+
+        # PDF — use existing navigation extraction
+        if suffix == ".pdf":
+            try:
+                content_summary = extract_pdf_content(str(file_path))
+                if content_summary:
+                    content_summary = content_summary[:8000]
+            except Exception as exc:
+                logger.warning("PDF extraction failed for %s: %s", file_path, exc)
+
+        # Plain text / CSV / JSON
+        elif suffix in {".txt", ".csv", ".json", ".md", ".log", ".xml", ".html"}:
+            try:
+                content_summary = file_path.read_text(errors="replace")[:8000]
+            except Exception as exc:
+                logger.warning("Text read failed for %s: %s", file_path, exc)
+
+        parts = [
+            f"The user sent a document via WhatsApp (media_id={media_id}).",
+            f"File saved locally at: {file_path}",
+        ]
+        if filename:
+            parts.append(f"Original filename: {filename}")
+        if content_summary:
+            parts.append(f"Extracted content (first 8000 chars):\n{content_summary}")
+        else:
+            parts.append(
+                "The file type could not be read inline. "
+                "Use available tools (bash, filesystem, OCR, vision) to inspect it."
+            )
+        if caption:
+            parts.append(f"Sender caption: {caption}")
+
+        return "\n\n".join(parts)
+
+    def _describe_received_media(
+        self,
+        media_id: str,
+        media_type: str,
+        caption: str = "",
+        filename: Optional[str] = None,
+    ) -> str:
+        """Build a prompt for unsupported media types (e.g. video)."""
+        parts = [f"The user sent a {media_type} via WhatsApp (media_id={media_id})."]
+        if filename:
+            parts.append(f"Original filename: {filename}")
+        if self.media_fetcher:
+            try:
+                file_path = self.media_fetcher.fetch_media(
+                    media_id, filename=filename,
+                )
+                parts.append(f"File saved locally at: {file_path}")
+            except Exception as exc:
+                logger.error("Failed to fetch WhatsApp %s %s: %s", media_type, media_id, exc)
+        if caption:
+            parts.append(f"Sender caption: {caption}")
+        return "\n\n".join(parts)
 
     def run_forever(self) -> None:
         while True:

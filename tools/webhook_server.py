@@ -37,10 +37,11 @@ class StoredMessage:
     caption: Optional[str] = None
     media_id: Optional[str] = None
     media_type: Optional[str] = None
+    filename: Optional[str] = None
     received_at: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d: Dict[str, Any] = {
             "id": self.id,
             "from": self.from_number,
             "timestamp": self.timestamp,
@@ -51,6 +52,9 @@ class StoredMessage:
             "media_type": self.media_type,
             "received_at": self.received_at,
         }
+        if self.filename:
+            d["filename"] = self.filename
+        return d
 
 
 class MessageStore:
@@ -73,6 +77,7 @@ class MessageStore:
                     caption TEXT,
                     media_id TEXT,
                     media_type TEXT,
+                    filename TEXT,
                     received_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -80,6 +85,11 @@ class MessageStore:
                 CREATE INDEX IF NOT EXISTS idx_messages_timestamp 
                 ON whatsapp_messages(timestamp DESC)
             """)
+            # Migrate existing tables that lack the filename column
+            try:
+                conn.execute("ALTER TABLE whatsapp_messages ADD COLUMN filename TEXT")
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
     def add(self, message: StoredMessage) -> None:
         """Store a message."""
@@ -87,8 +97,8 @@ class MessageStore:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO whatsapp_messages 
-                (id, from_number, timestamp, type, body, caption, media_id, media_type, received_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, from_number, timestamp, type, body, caption, media_id, media_type, filename, received_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     message.id,
@@ -99,6 +109,7 @@ class MessageStore:
                     message.caption,
                     message.media_id,
                     message.media_type,
+                    message.filename,
                     message.received_at or datetime.now().isoformat(),
                 ),
             )
@@ -139,6 +150,7 @@ class MessageStore:
                     caption=row["caption"],
                     media_id=row["media_id"],
                     media_type=row["media_type"],
+                    filename=row["filename"] if "filename" in row.keys() else None,
                     received_at=row["received_at"],
                 )
                 for row in rows
@@ -162,6 +174,7 @@ def extract_message(data: Dict[str, Any]) -> Optional[StoredMessage]:
         caption = None
         media_id = None
         media_type = None
+        filename = None
 
         if msg_type == "text":
             body = msg.get("text", {}).get("body")
@@ -169,6 +182,8 @@ def extract_message(data: Dict[str, Any]) -> Optional[StoredMessage]:
             media_type = msg_type
             media_id = msg.get(msg_type, {}).get("id")
             caption = msg.get(msg_type, {}).get("caption")
+            if msg_type == "document":
+                filename = msg.get("document", {}).get("filename")
         elif msg_type == "location":
             body = f"Location: {msg.get('location', {})}"
         elif msg_type == "contacts":
@@ -183,6 +198,7 @@ def extract_message(data: Dict[str, Any]) -> Optional[StoredMessage]:
             caption=caption,
             media_id=media_id,
             media_type=media_type,
+            filename=filename,
         )
     except (KeyError, IndexError) as e:
         logger.warning(f"Failed to extract message: {e}")
