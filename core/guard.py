@@ -49,7 +49,7 @@ class SubscriptionGuard:
                 
                 row = cursor.fetchone()
                 
-                if row and row[0] == 'authorized':
+                if row and row[0] in ('authorized', 'active', 'approved', 'paid'):
                     return True
                 return False
                 
