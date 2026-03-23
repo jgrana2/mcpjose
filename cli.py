@@ -58,81 +58,78 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
     return _create_registry().call_tool(name, arguments)
 
 
+def _extract_text_result(result: Any) -> Any:
+    if isinstance(result, dict):
+        return result.get("text", result)
+    return result
+
+
+def _load_ocr_context(ocr_context: str | None, ocr_file: str | None) -> str | None:
+    if ocr_file:
+        return load_text_file(ocr_file)
+    return ocr_context
+
+
+def _write_output_file(path: str, content: Any, message: str = "Saved to {path}") -> None:
+    Path(path).write_text(str(content), encoding="utf-8")
+    print(message.format(path=path))
+
+
+def _emit_text_or_write_output(
+    result: Any,
+    output_path: str | None = None,
+    save_message: str = "Saved to {path}",
+) -> None:
+    text = _extract_text_result(result)
+    if output_path:
+        _write_output_file(output_path, text, save_message)
+        return
+    print(text)
+
+
+def _build_vision_parser(description: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("image_path", help="Path to image or PDF")
+    parser.add_argument("prompt", help="Text prompt")
+    parser.add_argument("--ocr-context", default=None, help="OCR context text")
+    parser.add_argument("--ocr-file", default=None, help="Path to OCR context file")
+    parser.add_argument("--output", default=None, help="Output file path")
+    parser.add_argument("--model", default=None, help="Model name")
+    return parser
+
+
+def _run_vision_main(tool_name: str, description: str) -> None:
+    parser = _build_vision_parser(description)
+    args = parser.parse_args()
+    result = _call_tool(
+        tool_name,
+        {
+            "image_path": args.image_path,
+            "prompt": args.prompt,
+            "ocr_context": _load_ocr_context(args.ocr_context, args.ocr_file),
+            "model": args.model,
+        },
+    )
+    _emit_text_or_write_output(result, args.output)
+
+
 def call_llm_main() -> None:
     """Legacy CLI entry point for OpenAI LLM."""
     parser = argparse.ArgumentParser(description="Call OpenAI API with a prompt")
     parser.add_argument("prompt", help="The prompt to send")
     args = parser.parse_args()
     result = _call_tool("call_llm", {"prompt": args.prompt})
-    print(result.get("text", result))
+    print(_extract_text_result(result))
 
 
 def openai_vision_main() -> None:
     """Legacy CLI entry point for OpenAI Vision."""
-    parser = argparse.ArgumentParser(description="Process images with OpenAI Vision")
-    parser.add_argument("image_path", help="Path to image or PDF")
-    parser.add_argument("prompt", help="Text prompt")
-    parser.add_argument("--ocr-context", default=None, help="OCR context text")
-    parser.add_argument("--ocr-file", default=None, help="Path to OCR context file")
-    parser.add_argument("--output", default=None, help="Output file path")
-    parser.add_argument("--model", default=None, help="Model name")
-    args = parser.parse_args()
-
-    ocr_context = args.ocr_context
-    if args.ocr_file:
-        ocr_context = load_text_file(args.ocr_file)
-
-    result = _call_tool(
-        "openai_vision_tool",
-        {
-            "image_path": args.image_path,
-            "prompt": args.prompt,
-            "ocr_context": ocr_context,
-            "model": args.model,
-        },
-    )
-    text = result.get("text", result)
-
-    if args.output:
-        Path(args.output).write_text(str(text), encoding="utf-8")
-        print(f"Saved to {args.output}")
-        return
-
-    print(text)
+    _run_vision_main("openai_vision_tool", "Process images with OpenAI Vision")
 
 
 def gemini_vision_main() -> None:
     """Legacy CLI entry point for Gemini Vision."""
-    parser = argparse.ArgumentParser(description="Process images with Gemini Vision")
-    parser.add_argument("image_path", help="Path to image or PDF")
-    parser.add_argument("prompt", help="Text prompt")
-    parser.add_argument("--ocr-context", default=None, help="OCR context text")
-    parser.add_argument("--ocr-file", default=None, help="Path to OCR context file")
-    parser.add_argument("--output", default=None, help="Output file path")
-    parser.add_argument("--model", default=None, help="Model name")
-    args = parser.parse_args()
-
-    ocr_context = args.ocr_context
-    if args.ocr_file:
-        ocr_context = load_text_file(args.ocr_file)
-
-    result = _call_tool(
-        "gemini_vision_tool",
-        {
-            "image_path": args.image_path,
-            "prompt": args.prompt,
-            "ocr_context": ocr_context,
-            "model": args.model,
-        },
-    )
-    text = result.get("text", result)
-
-    if args.output:
-        Path(args.output).write_text(str(text), encoding="utf-8")
-        print(f"Saved to {args.output}")
-        return
-
-    print(text)
+    _run_vision_main("gemini_vision_tool", "Process images with Gemini Vision")
 
 
 def google_ocr_main() -> None:
@@ -207,13 +204,12 @@ def transcribe_audio_main() -> None:
     )
 
     if args.format == "text":
-        output = result.get("text", result)
+        output = _extract_text_result(result)
     else:
         output = json.dumps(result, indent=2, ensure_ascii=False, default=str)
 
     if args.output:
-        Path(args.output).write_text(str(output), encoding="utf-8")
-        print(f"Saved to {args.output}")
+        _write_output_file(args.output, output)
         return
 
     print(output)

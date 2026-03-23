@@ -86,7 +86,10 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
         mcp: FastMCP server instance.
         http_client: Optional custom HTTP client (for testing/dependency injection).
     """
-    client = http_client or HTTPClient()
+    # Delegate tool behavior to the canonical shared registry implementation.
+    from langchain_agent.tool_registry import ProjectToolRegistry
+
+    registry = ProjectToolRegistry()
 
     @mcp.tool()
     def navigate_to_url(url: str) -> Dict[str, Any]:
@@ -98,22 +101,4 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
         Returns:
             Dictionary with 'content' (for PDF) or 'text', 'links', 'images' (for HTML), 'url', and 'type' keys.
         """
-        try:
-            # Try PDF extraction first for PDF URLs
-            if is_pdf_file(url):
-                pdf_content = extract_pdf_content(url, client)
-                if pdf_content:
-                    return {"content": pdf_content, "url": url, "type": "pdf"}
-
-            # Fall back to HTML extraction
-            html_data = extract_html_content(url, client)
-            return {
-                "text": html_data["text"],
-                "links": html_data["links"],
-                "images": html_data["images"],
-                "url": url,
-                "type": "html",
-            }
-
-        except Exception as e:
-            return {"error": f"Error navigating to {url}: {str(e)}", "url": url}
+        return registry.navigate_to_url(url)

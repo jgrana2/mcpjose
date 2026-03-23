@@ -258,13 +258,10 @@ class WhatsAppCloudAPIClient:
 
 
 def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
-    base_http = http_client or HTTPClient()
-    repo_root = get_config().repo_root
-    limiter = DailyRateLimiter.from_env(default_path=Path(repo_root) / "auth" / "rate_limits.sqlite")
-    daily_max = int(os.getenv("WHATSAPP_DAILY_MAX", "10"))
-    default_destination = os.getenv("WHATSAPP_DEFAULT_DESTINATION")
-    tz_name = os.getenv("WHATSAPP_TIMEZONE")
-    tz = ZoneInfo(tz_name) if tz_name else datetime.now().astimezone().tzinfo
+    # Delegate tool behavior to the canonical shared registry implementation.
+    from langchain_agent.tool_registry import ProjectToolRegistry
+
+    registry = ProjectToolRegistry()
 
     @mcp.tool()
     def send_ws_msg(
@@ -297,105 +294,17 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
             media_url: Public URL to an image to send without uploading.
             mime_type: Optional MIME type override for local uploads.
         """
-        if destination:
-            normalized = _normalize_e164ish(destination)
-        else:
-            dest = (default_destination or "").strip()
-            if not dest:
-                return WhatsAppSendResult(
-                    ok=False,
-                    destination="",
-                    provider="whatsapp_cloud_api",
-                    error="Missing destination. Provide a destination or set WHATSAPP_DEFAULT_DESTINATION.",
-                ).to_dict()
-            normalized = _normalize_e164ish(dest)
-        if not message or not message.strip():
-            return WhatsAppSendResult(
-                ok=False,
-                destination=normalized,
-                provider="whatsapp_cloud_api",
-                error="Message must be a non-empty string.",
-            ).to_dict()
-        rate = limiter.consume(scope="send_ws_msg", limit=daily_max, amount=1, tz=tz)
-        if not rate.allowed:
-            return WhatsAppSendResult(
-                ok=False,
-                destination=normalized,
-                provider="whatsapp_cloud_api",
-                error=f"Daily rate limit exceeded for send_ws_msg (max {daily_max}/day).",
-                rate_limit_day=rate.day,
-                rate_limit_used=rate.used,
-                rate_limit_limit=rate.limit,
-                rate_limit_remaining=rate.remaining,
-            ).to_dict()
-        try:
-            api = WhatsAppCloudAPIClient(
-                access_token=os.getenv("WHATSAPP_ACCESS_TOKEN", ""),
-                phone_number_id=os.getenv("WHATSAPP_PHONE_NUMBER_ID", ""),
-                api_version=os.getenv("WHATSAPP_API_VERSION", "v22.0"),
-                http_client=base_http,
-            )
-            effective_template = template_name or os.getenv("WHATSAPP_TEMPLATE_NAME")
-            effective_lang = language_code or os.getenv("WHATSAPP_TEMPLATE_LANGUAGE", "en_US")
-            media_source = image_path or media_path
-            if media_source:
-                if media_url:
-                    return WhatsAppSendResult(
-                        ok=False,
-                        destination=normalized,
-                        provider=api.name,
-                        error="Provide either a local media path or media_url, not both.",
-                        rate_limit_day=rate.day,
-                        rate_limit_used=rate.used,
-                        rate_limit_limit=rate.limit,
-                        rate_limit_remaining=rate.remaining,
-                    ).to_dict()
-                media_id = api.upload_media(media_source, mime_type=mime_type)
-                result = api.send_image_message(normalized, media_id=media_id, caption=message.strip())
-            elif media_url:
-                payload = {
-                    "messaging_product": "whatsapp",
-                    "to": normalized,
-                    "type": "image",
-                    "image": {"link": media_url, "caption": message.strip()},
-                }
-                url = f"https://graph.facebook.com/{api.api_version}/{api.phone_number_id}/messages"
-                result = base_http.post(url, json=payload).json()
-            else:
-                result = api.send_text_message(normalized, message.strip(), effective_template, effective_lang)
-            message_id = None
-            if isinstance(result, dict):
-                messages = result.get("messages")
-                if isinstance(messages, list) and messages:
-                    message_id = messages[0].get("id")
-            return WhatsAppSendResult(
-                ok=True,
-                destination=normalized,
-                provider=api.name,
-                message_id=message_id,
-                rate_limit_day=rate.day,
-                rate_limit_used=rate.used,
-                rate_limit_limit=rate.limit,
-                rate_limit_remaining=rate.remaining,
-            ).to_dict()
-        except Exception as e:
-            return WhatsAppSendResult(
-                ok=False,
-                destination=normalized,
-                provider="whatsapp_cloud_api",
-                error=str(e),
-                rate_limit_day=rate.day,
-                rate_limit_used=rate.used,
-                rate_limit_limit=rate.limit,
-                rate_limit_remaining=rate.remaining,
-            ).to_dict()
+        return registry.send_ws_msg(
+            destination=destination,
+            message=message,
+            template_name=template_name,
+            language_code=language_code,
+            image_path=image_path,
+            media_path=media_path,
+            media_url=media_url,
+            mime_type=mime_type,
+        )
 
     @mcp.tool()
     def get_ws_messages(limit: int = 10, since: Optional[str] = None) -> Dict[str, Any]:
-        try:
-            from tools.webhook_server import get_message_store
-            store = get_message_store()
-            messages = store.get_recent(limit=limit, since=since)
-            return {"ok": True, "messages": [m.to_dict() for m in messages], "count": len(messages)}
-        except Exception as e:
-            return {"ok": False, "messages": [], "count": 0, "error": str(e)}
+        return registry.get_ws_messages(limit=limit, since=since)

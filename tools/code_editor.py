@@ -14,10 +14,12 @@ from tools.filesystem import FilesystemTools
 
 def init_tools(mcp: FastMCP) -> None:
     """Register the str_replace_editor tool with MCP."""
+    # Delegate tool behavior to the canonical shared registry implementation.
+    from langchain_agent.tool_registry import ProjectToolRegistry
 
-    fs = FilesystemTools()
-    # In-memory undo stack: resolved_path -> list of prior contents (newest last)
-    _undo_stack: Dict[str, List[str]] = {}
+    registry = ProjectToolRegistry()
+    # Keep legacy patch points working (tests monkeypatch FilesystemTools here).
+    registry.fs_tools = FilesystemTools()
 
     @mcp.tool()
     def str_replace_editor(
@@ -54,27 +56,15 @@ def init_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with output or error key.
         """
-        try:
-            resolved = fs._validate_path(path)
-        except ValueError as e:
-            return {"error": str(e)}
-
-        if command == "view":
-            return _cmd_view(resolved, view_range)
-
-        if command == "create":
-            return _cmd_create(resolved, file_text, _undo_stack)
-
-        if command == "str_replace":
-            return _cmd_str_replace(resolved, old_str, new_str, _undo_stack)
-
-        if command == "insert":
-            return _cmd_insert(resolved, insert_line, new_str, _undo_stack)
-
-        if command == "undo_edit":
-            return _cmd_undo(resolved, _undo_stack)
-
-        return {"error": f"Unknown command '{command}'. Use: view, create, str_replace, insert, undo_edit."}
+        return registry.str_replace_editor(
+            command=command,
+            path=path,
+            file_text=file_text,
+            old_str=old_str,
+            new_str=new_str,
+            insert_line=insert_line,
+            view_range=view_range,
+        )
 
 
 # ---------------------------------------------------------------------------

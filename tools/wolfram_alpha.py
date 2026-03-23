@@ -90,8 +90,10 @@ class WolframAlphaClient:
 
 def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
     """Register Wolfram Alpha tools."""
+    # Delegate tool behavior to the canonical shared registry implementation.
+    from langchain_agent.tool_registry import ProjectToolRegistry
 
-    base_http = http_client or HTTPClient()
+    registry = ProjectToolRegistry()
 
     @mcp.tool()
     def wolfram_alpha(
@@ -113,22 +115,9 @@ def init_tools(mcp: FastMCP, http_client: Optional[HTTPClient] = None) -> None:
             text: Wolfram Alpha's plain-text answer when successful.
             error: Error message and HTTP status code when unsuccessful.
         """
-        try:
-            get_config()
-            client = WolframAlphaClient(
-                app_id=os.getenv("WOLFRAM_ALPHA_APP_ID", ""),
-                http_client=base_http,
-            )
-            return client.query(
-                query=query,
-                maxchars=maxchars,
-                units=units,
-                assumption=assumption,
-            )
-        except Exception as exc:
-            return {
-                "ok": False,
-                "provider": "wolfram_alpha",
-                "query": query,
-                "error": str(exc),
-            }
+        return registry.wolfram_alpha(
+            query=query,
+            maxchars=maxchars,
+            units=units,
+            assumption=assumption,
+        )
