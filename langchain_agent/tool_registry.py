@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import mimetypes
 import os
 import threading
 from datetime import datetime
@@ -631,9 +632,15 @@ class ProjectToolRegistry:
                         rate_limit_limit=rate.limit,
                         rate_limit_remaining=rate.remaining,
                     ).to_dict()
+                source_path = Path(media_source)
+                resolved_mime = mime_type or mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
                 media_id = client.upload_media(media_source, mime_type=mime_type)
-                result = client.send_image_message(
-                    normalized, media_id=media_id, caption=message.strip()
+                result = client.send_media_message(
+                    normalized,
+                    media_id=media_id,
+                    mime_type=resolved_mime,
+                    caption=message.strip() or None,
+                    filename=source_path.name,
                 )
             elif media_url:
                 # For media_url, construct the payload manually since send_image_message

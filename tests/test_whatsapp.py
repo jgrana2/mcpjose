@@ -171,15 +171,30 @@ class TestWhatsAppCloudAPIClient:
         assert mock_post.call_args[1]["data"]["type"] == "image/jpeg"
 
     @patch.object(HTTPClient, "post")
-    def test_send_image_message(self, mock_post):
+    def test_send_media_message_image(self, mock_post):
         mock_response = Mock()
         mock_response.json.return_value = {"messages": [{"id": "wamid.image123"}]}
         mock_post.return_value = mock_response
         client = WhatsAppCloudAPIClient(access_token="test_token", phone_number_id="123456")
-        _ = client.send_image_message("+14155551234", media_id="media_123", caption="Hello")
+        _ = client.send_media_message("+14155551234", media_id="media_123", mime_type="image/jpeg", caption="Hello")
         payload = mock_post.call_args[1]["json"]
         assert payload["type"] == "image"
         assert payload["image"]["caption"] == "Hello"
+
+    @patch.object(HTTPClient, "post")
+    def test_send_media_message_document(self, mock_post):
+        mock_response = Mock()
+        mock_response.json.return_value = {"messages": [{"id": "wamid.doc123"}]}
+        mock_post.return_value = mock_response
+        client = WhatsAppCloudAPIClient(access_token="test_token", phone_number_id="123456")
+        _ = client.send_media_message(
+            "+14155551234", media_id="media_456", mime_type="application/pdf",
+            caption="See attached", filename="report.pdf"
+        )
+        payload = mock_post.call_args[1]["json"]
+        assert payload["type"] == "document"
+        assert payload["document"]["caption"] == "See attached"
+        assert payload["document"]["filename"] == "report.pdf"
 
 
 class TestWhatsAppToolIntegration:
@@ -223,7 +238,7 @@ class TestWhatsAppToolIntegration:
         mock_limiter.consume.return_value = mock_rate_result
         mock_limiter_factory.return_value = mock_limiter
         with patch("tools.whatsapp.WhatsAppCloudAPIClient.upload_media", return_value="media_123") as mock_upload:
-            with patch("tools.whatsapp.WhatsAppCloudAPIClient.send_image_message", return_value={"messages": [{"id": "wamid.img"}]}) as mock_send_image:
+            with patch("tools.whatsapp.WhatsAppCloudAPIClient.send_media_message", return_value={"messages": [{"id": "wamid.img"}]}) as mock_send_media:
                 init_tools(mcp_server)
                 result = mcp_server._tool_manager._tools["send_ws_msg"].fn(
                     destination=None,
@@ -233,7 +248,29 @@ class TestWhatsAppToolIntegration:
                 assert result["ok"] is True
                 assert result["message_id"] == "wamid.img"
                 mock_upload.assert_called_once()
-                mock_send_image.assert_called_once()
+                mock_send_media.assert_called_once()
+                _, kwargs = mock_send_media.call_args
+                assert kwargs["mime_type"] == "image/png"
+
+    @patch("tools.whatsapp.DailyRateLimiter.from_env")
+    def test_send_ws_msg_pdf_path_uses_document_type(self, mock_limiter_factory, mcp_server, mock_env):
+        mock_limiter = Mock()
+        mock_rate_result = Mock(allowed=True, day="2026-03-03", used=1, limit=10, remaining=9)
+        mock_limiter.consume.return_value = mock_rate_result
+        mock_limiter_factory.return_value = mock_limiter
+        with patch("tools.whatsapp.WhatsAppCloudAPIClient.upload_media", return_value="media_789"):
+            with patch("tools.whatsapp.WhatsAppCloudAPIClient.send_media_message", return_value={"messages": [{"id": "wamid.doc"}]}) as mock_send_media:
+                init_tools(mcp_server)
+                result = mcp_server._tool_manager._tools["send_ws_msg"].fn(
+                    destination=None,
+                    message="See attached",
+                    media_path="/tmp/report.pdf",
+                )
+                assert result["ok"] is True
+                mock_send_media.assert_called_once()
+                _, kwargs = mock_send_media.call_args
+                assert kwargs["mime_type"] == "application/pdf"
+                assert kwargs["filename"] == "report.pdf"
 
 
 if __name__ == "__main__":

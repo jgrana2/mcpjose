@@ -209,21 +209,31 @@ class WhatsAppCloudAPIClient:
             raise RuntimeError("WhatsApp media upload did not return an id")
         return media_id
 
-    def send_image_message(
+    def send_media_message(
         self,
         destination: str,
         media_id: str,
+        mime_type: str,
         caption: Optional[str] = None,
+        filename: Optional[str] = None,
     ) -> Dict[str, Any]:
         to = _normalize_e164ish(destination)
-        image_block: Dict[str, Any] = {"id": media_id}
+        if mime_type.startswith("image/"):
+            msg_type = "image"
+        elif mime_type.startswith("video/"):
+            msg_type = "video"
+        else:
+            msg_type = "document"
+        media_block: Dict[str, Any] = {"id": media_id}
         if caption:
-            image_block["caption"] = caption
+            media_block["caption"] = caption
+        if filename and msg_type == "document":
+            media_block["filename"] = filename
         payload = {
             "messaging_product": "whatsapp",
             "to": to,
-            "type": "image",
-            "image": image_block,
+            "type": msg_type,
+            msg_type: media_block,
         }
         url = f"https://graph.facebook.com/{self.api_version}/{self.phone_number_id}/messages"
         try:
