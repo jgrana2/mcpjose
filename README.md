@@ -1,6 +1,6 @@
 # MCP Jose
 
-**MCP Jose** is a unified **MCP (Model Context Protocol) server** that exposes a comprehensive collection of AI-powered tools (vision, OCR, image generation, transcription, web search, messaging) behind a single server. This project enables AI assistants to interact with external services through a well-designed interface.
+**MCP Jose** is a unified **MCP (Model Context Protocol) server** that exposes a comprehensive collection of AI-powered tools behind a single server. It includes vision, OCR, image generation, transcription, web search, messaging, and subscription/payment utilities.
 
 ## Features
 
@@ -14,7 +14,7 @@
 ### Web & Search
 - **Web Search**: Search the web using DuckDuckGo or Google
 - **Page Navigation**: Extract content from URLs and PDFs
-- **X/Twitter Search**: Search for tweets on specific topics
+- **X/Twitter Search**: Search for posts on specific topics
 - **Content Extraction**: Read and process web pages and documents
 
 ### Messaging & Communication
@@ -22,8 +22,13 @@
 - **Template Messages**: Support for WhatsApp template messages
 - **Rate Limiting**: Built-in rate limiting for API calls
 
+### Payments & Subscriptions
+- **Mercado Pago Subscriptions**: Create subscription checkout links and track preapproval status
+- **Webhook Processing**: Sync Mercado Pago subscription updates into SQLite
+- **Subscription Guarding**: Gate premium access based on subscription status
+
 ### Development & Agent Support
-- **Agent Skills**: 15+ specialized skills for coding agents (document creation, design, web development, research, symbolic computation)
+- **Agent Skills**: Specialized skills for coding agents (research, docs, design, web development, communication, etc.)
 - **LangChain Agent**: Dedicated LangChain tool-calling agent wired to project tools, skills, and `AGENTS.md`
 - **CLI Interface**: Command-line tools for direct tool execution
 - **Provider Pattern**: Clean abstraction for different AI service providers
@@ -34,25 +39,24 @@
 ```
 /
 ├── .agents/              # Agent Skills for enhanced capabilities
-│   └── skills/          # Domain-specific knowledge modules
-├── mcp_server/          # Main MCP server implementation
-├── core/                # Core utilities and interfaces
-│   ├── config.py       # Credential management
-│   ├── utils.py        # Helper functions
-│   └── rate_limit.py   # Rate limiting implementation
-├── providers/           # AI provider implementations
-│   ├── __init__.py     # Provider factory
-│   └── search.py       # Search provider abstraction
-├── tools/              # Individual tool modules
-│   ├── navigation.py   # Web navigation tools
-│   ├── whatsapp.py     # WhatsApp messaging tools
-│   ├── search.py       # Search tools
-│   └── filesystem.py   # File system tools
-├── auth/               # Authentication handling
-├── tests/              # Test suite
-├── userapp/            # User application code
-├── langchain_agent/    # LangChain agent integration package
-└── cli.py              # CLI entry points
+│   └── skills/           # Domain-specific knowledge modules
+├── mcp_server/           # Main MCP server implementation
+├── core/                 # Core utilities and interfaces
+│   ├── config.py         # Credential management
+│   ├── utils.py          # Helper functions
+│   └── rate_limit.py     # Rate limiting implementation
+├── providers/            # AI provider implementations
+├── tools/                # Individual tool modules
+│   ├── navigation.py     # Web navigation tools
+│   ├── whatsapp.py       # WhatsApp messaging tools
+│   ├── payment_gateway.py # Mercado Pago subscription checkout tools
+│   ├── payment_webhook.py # Mercado Pago webhook processing
+│   └── search.py         # Search tools
+├── auth/                 # Authentication handling
+├── tests/                # Test suite
+├── userapp/              # User application code
+├── langchain_agent/      # LangChain agent integration package
+└── cli.py                # CLI entry points
 ```
 
 ## Quick Start
@@ -60,6 +64,7 @@
 ### Prerequisites
 - Python 3.8+
 - API keys for services you plan to use (OpenAI, Google Cloud, etc.)
+- Mercado Pago access token and webhook secret if you plan to use subscriptions
 
 ### Installation
 
@@ -95,6 +100,11 @@ SEARCH_ENGINE=ddgs  # or 'pse' for Google
 WHATSAPP_ACCESS_TOKEN=your_whatsapp_token
 WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id
 WHATSAPP_BUSINESS_ACCOUNT_ID=your_business_account_id
+
+# Mercado Pago
+MERCADOPAGO_ACCESS_TOKEN=your_mercadopago_access_token
+MP_PAYER_EMAIL=buyer@example.com
+MP_WEBHOOK_SECRET=your_webhook_secret
 ```
 
 ### Running the MCP Server
@@ -102,8 +112,6 @@ WHATSAPP_BUSINESS_ACCOUNT_ID=your_business_account_id
 ```bash
 # Start the MCP server
 python -m mcp_server.server
-
-# The server will start and be ready to accept connections
 ```
 
 ### Using CLI Tools
@@ -130,6 +138,12 @@ python cli.py tool call search_places --arg query="coffee shops" --arg max_resul
 # Send WhatsApp messages
 python cli.py tool call send_ws_msg --arg destination="+1234567890" --arg message="Hello from MCP Jose!"
 
+# Create a Mercado Pago subscription link
+python cli.py tool call mp_create_checkout_link --arg phone_number="+573002612420"
+
+# Simulate a Mercado Pago webhook payload
+python cli.py tool call mp_simulate_webhook --json '{"payload":"{\"type\":\"subscription_preapproval\",\"data\":{\"id\":\"sub_123\"}}"}'
+
 # Run the webhook server
 python cli.py whatsapp-webhook --port 5000
 ```
@@ -153,8 +167,6 @@ python -m langchain_agent.main --whatsapp
 python -m langchain_agent.main --interactive --voice
 ```
 
-Agent responses in terminal sessions are rendered as Markdown when the terminal supports it, with a plain-text fallback otherwise.
-
 ## Available Tools
 
 ### MCP Server Tools
@@ -162,17 +174,22 @@ The following tools are available when running the MCP server:
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `search` | Search the web | `query`: Search query |
-| `navigate_to_url` | Extract content from URLs | `url`: Target URL |
-| `x_search` | Search X/Twitter | `topic`: Search topic |
-| `call_llm` | Generate text with OpenAI | `prompt`: Text prompt |
+| `search` | Search the web | `query` |
+| `navigate_to_url` | Extract content from URLs | `url` |
+| `x_search` | Search X/Twitter | `topic` |
+| `call_llm` | Generate text with OpenAI | `prompt` |
 | `openai_vision_tool` | Process images with OpenAI Vision | `image_path`, `prompt` |
+| `gemini_vision_tool` | Process images with Gemini Vision | `image_path`, `prompt` |
 | `transcribe_audio` | Transcribe audio files | `audio_path`, `model`, `language` |
 | `generate_image` | Generate images with Gemini | `prompt`, `output_path` |
 | `google_ocr` | Extract text with Google Vision | `input_file`, `file_type` |
-| `wolfram_alpha` | Query Wolfram|Alpha for computed and symbolic answers | `query`, `maxchars`, `units`, `assumption` |
+| `wolfram_alpha` | Query Wolfram Alpha for computed and symbolic answers | `query`, `maxchars`, `units`, `assumption` |
 | `send_ws_msg` | Send WhatsApp messages to any destination or default fallback | `destination` (optional), `message`, `template_name` (optional) |
 | `get_ws_messages` | Fetch recent WhatsApp messages from webhook storage | `limit` (optional, default 10), `since` (optional, ISO 8601 timestamp) |
+| `mp_create_checkout_link` | Create a Mercado Pago subscription checkout link | `phone_number`, `payer_email` (optional) |
+| `mp_check_subscription` | Check Mercado Pago subscription status by preapproval ID | `subscription_id` |
+| `mp_cancel_subscription` | Cancel a Mercado Pago subscription by preapproval ID | `subscription_id` |
+| `mp_simulate_webhook` | Simulate a Mercado Pago webhook payload for testing | `payload` (JSON string) |
 
 ### WhatsApp Webhook Setup
 
@@ -181,17 +198,13 @@ To receive messages, you need to run the webhook server:
 ```bash
 # Start the webhook server
 python cli.py whatsapp-webhook --port 5000
-
-# Or with custom options
-python cli.py whatsapp-webhook --host 0.0.0.0 --port 5000
 ```
 
 Then configure in Meta Developer dashboard:
 
-1. **Go to:** Meta Developers → Your App → WhatsApp → Configuration
-2. **Webhook URL:** `https://your-domain.com/webhook` (use ngrok for local testing)
-3. **Verify Token:** Set in `WHATSAPP_WEBHOOK_VERIFY_TOKEN` env var
-4. **Subscribe to fields:** `messages`
+1. **Webhook URL:** `https://your-domain.com/webhook` (use ngrok for local testing)
+2. **Verify Token:** Set in `WHATSAPP_WEBHOOK_VERIFY_TOKEN` env var
+3. **Subscribe to fields:** `messages`
 
 For local testing with ngrok:
 ```bash
@@ -200,8 +213,6 @@ python cli.py whatsapp-webhook --port 5000
 
 # Terminal 2: Expose via ngrok
 ngrok http 5000
-
-# Use the ngrok HTTPS URL in Meta dashboard
 ```
 
 ### Agent Skills
@@ -209,13 +220,12 @@ The project includes specialized Agent Skills for coding agents:
 
 - **Research & Information Gathering**: `mcpjose-research`, `mcp-builder`
 - **Document Creation & Manipulation**: `docx`, `pdf`, `pptx`, `xlsx`, `doc-coauthoring`
-- **Design & Visual Content**: `frontend-design`
+- **Design & Visual Content**: `frontend-design`, `canvas-design`, `algorithmic-art`, `theme-factory`
 - **Web Development**: `web-artifacts-builder`, `webapp-testing`
 - **Communication & Internal Tools**: `internal-comms`
 - **Math & Computation**: `wolfram-alpha`
 - **Meta Skills**: `skill-creator`
 - **Connectors & Platforms**: `notion`, `linear`, `sentry`, `vercel-deploy`, `netlify-deploy`, `cloudflare-deploy`, `render-deploy`, `aspnet-core`, `winui-app`
-
 
 ## Development
 
@@ -229,12 +239,10 @@ pytest
 pytest tests/test_search.py
 pytest tests/test_whatsapp.py
 pytest tests/test_mcp_tools.py
+pytest tests/test_payment_gateway.py
 
 # Run with verbose output
 pytest -v
-
-# Run with coverage
-pytest --cov=.
 ```
 
 ### Linting and Formatting
@@ -245,9 +253,6 @@ ruff check .
 
 # Format code
 ruff format .
-
-# Check types (if type hints are used)
-mypy .
 ```
 
 ### Adding New Tools
@@ -257,130 +262,3 @@ mypy .
 3. Register the tool in `mcp_server/server.py`
 4. Add tests in `tests/`
 5. Update CLI entry points in `cli.py` if needed
-
-### Adding New Providers
-
-1. Implement interface from `core/interfaces.py`
-2. Add to `providers/__init__.py` factory methods
-3. Update configuration in `core/config.py` if needed
-
-## API Requirements
-
-### Required API Keys
-Depending on which tools you use, you may need:
-
-- **OpenAI API Key**: For vision, transcription, and LLM tools
-- **Google Cloud Credentials**: For OCR and Gemini services
-- **Meta WhatsApp API**: For WhatsApp messaging
-- **Twitter/X API** (optional): For enhanced X search functionality
-
-### Rate Limiting
-The project includes rate limiting for WhatsApp messaging in `core/rate_limit.py` to prevent API abuse.
-
-## Examples
-
-### Using the MCP Server with Claude Desktop
-1. Add the server to your Claude Desktop configuration:
-```json
-{
-  "mcpServers": {
-    "mcpjose": {
-      "command": "python",
-      "args": ["-m", "mcp_server.server"],
-      "env": {
-        "PYTHONPATH": "/path/to/mcpjose"
-      }
-    }
-  }
-}
-```
-
-2. Restart Claude Desktop
-3. The tools will be available in your conversations
-
-### Direct Python Usage
-```python
-from providers import ProviderFactory
-
-# Create providers
-vision = ProviderFactory.create_vision("openai")
-ocr = ProviderFactory.create_ocr("google")
-llm = ProviderFactory.create_llm("openai")
-
-# Use providers
-result = vision.process_image("image.jpg", "Describe this image")
-text = ocr.extract_text("document.pdf")
-response = llm.complete("Write a poem about AI")
-```
-
-## Project Structure Details
-
-### Core Components
-- **`core/config.py`**: Singleton credential manager with secure API key handling
-- **`core/utils.py`**: Utility functions for file handling and common operations
-- **`core/rate_limit.py`**: Rate limiting implementation for API calls
-
-### Provider Pattern
-All AI services use a provider abstraction:
-```python
-from providers import ProviderFactory
-
-# Factory creates appropriate provider instances
-provider = ProviderFactory.create_vision("openai")  # or "gemini"
-```
-
-### Tool Registration
-Tools are registered in `mcp_server/server.py` and follow a consistent pattern:
-- Each tool module has an `init_tools()` function
-- Tools are added to the MCP server instance
-- Error handling and input validation are built-in
-
-## Security Considerations
-
-### Never Commit Secrets
-- Never commit `.env` files or credential files
-- Never commit API keys, tokens, or passwords
-- Use the credential manager for secure storage
-
-### Input Validation
-- All tools validate input parameters
-- File paths are sanitized before use
-- URL navigation includes safety checks
-
-### Rate Limiting
-- WhatsApp messaging has built-in rate limiting
-- Consider adding rate limits for other APIs as needed
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests: `pytest`
-5. Run linting: `ruff check .`
-6. Format code: `ruff format .`
-7. Submit a pull request
-
-### Pull Request Guidelines
-- Include clear description of changes
-- Add tests for new functionality
-- Update documentation as needed
-- Follow existing code patterns
-
-## License
-
-This project is available for use under appropriate licensing terms.
-
-## Support
-
-For issues and questions:
-- Check the [AGENTS.md](AGENTS.md) file for agent-specific guidance
-- Review existing tests for usage examples
-- Check the `core/config.py` for configuration options
-
-## Next Steps
-
-- Explore the `userapp/` directory for example applications
-- Check out the Agent Skills in `.agents/skills/` for specialized workflows
-- Review the test suite for comprehensive usage examples
-- Customize the configuration for your specific needs
