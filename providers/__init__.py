@@ -48,7 +48,7 @@ class OpenAIClient:
 class OpenAIVisionProvider(VisionProvider):
     """OpenAI GPT-4 Vision implementation."""
 
-    DEFAULT_MODEL = "gpt-5.2"
+    DEFAULT_MODEL = "gpt-5.4-mini"
 
     def __init__(self, model: Optional[str] = None):
         self.model = model or self.DEFAULT_MODEL
@@ -83,8 +83,13 @@ class OpenAIVisionProvider(VisionProvider):
 
             complete_prompt = build_ocr_prompt(prompt, ocr_context)
 
+            # Get model from kwargs, falling back to instance model if None
+            model = kwargs.get("model")
+            if model is None:
+                model = self.model
+
             response = self.client.responses.create(
-                model=kwargs.get("model", self.model),
+                model=model,
                 input=[
                     {
                         "role": "user",
