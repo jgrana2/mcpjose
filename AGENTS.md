@@ -49,6 +49,7 @@ This project includes **Agent Skills** (https://agentskills.io) in the `.agents/
 - **canvas-design**: Create beautiful visual art in .png and .pdf documents using design philosophy
 - **algorithmic-art**: Create algorithmic art using p5.js with seeded randomness, flow fields, and particle systems
 - **theme-factory**: Apply 10 pre-set themes or generate custom themes for artifacts (slides, docs, HTML pages)
+- **kicad-pcb-photorealistic**: Transform KiCad PCB 3D renders into photorealistic marketing-ready images with perfect perspective alignment
 
 #### 🌐 Web Development
 - **web-artifacts-builder**: Build complex, multi-component HTML artifacts using React, Tailwind CSS, and shadcn/ui
