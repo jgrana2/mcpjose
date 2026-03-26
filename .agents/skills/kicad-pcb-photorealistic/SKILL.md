@@ -1,3 +1,9 @@
+---
+name: kicad-pcb-photorealistic
+description: Transform KiCad PCB 3D renders into photorealistic marketing-ready images while preserving technical details and perfect perspective alignment.
+license: Complete terms in LICENSE.txt
+---
+
 # KiCad PCB 3D Render to Photorealistic Converter
 
 Transform KiCad PCB 3D renders into photorealistic marketing-ready images while preserving all technical details and maintaining perfect perspective alignment for side-by-side comparison.
