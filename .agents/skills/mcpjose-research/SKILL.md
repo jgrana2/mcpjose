@@ -26,6 +26,25 @@ See `references/mcpjose-tools.md` for a compact list of available tools and beha
 - For each selected result, run `navigate_to_url` and extract only the key parts.
 - Synthesize an answer. Include a short "Sources" list with URLs.
 
+2a) Recency-first queries (when user says "latest", "new", "recent", "this year")
+
+- Default interpretation: "this year" = current calendar year; "latest" = prioritize the current year first, then fall back to the last 12 months if needed.
+- Start with time-bounded queries (add the year and/or month): e.g. `"<brand>" "<product line>" 2026`, `site:<brand-domain> <product> 2026`, `<event> 2026 <brand> <product>`.
+- Prefer primary sources for the final list:
+  - Official product pages (e.g. `site:<brand-domain>/<product-slug-prefix>`)
+  - Official news/press posts if available
+  - Reputable industry press for announcement dates/pricing when official pages lack dates
+- If results are noisy, pivot queries rather than broadening time:
+  - Add a specific model keyword (e.g. `"<model name>"`)
+  - Use `site:` constraints for manufacturer + 1-2 major outlets
+
+2b) Product-page discovery pattern (for "list models" requests)
+
+- Run a targeted `site:` search for the brand's product URL pattern (common for music gear brands):
+  - Example: `site:<brand-domain> <product-slug-prefix>` and `site:<brand-domain> "<product line>" "Discover"`
+- Open likely product pages and collection pages with `navigate_to_url`.
+- Cross-check the product name with at least one independent source when launch timing matters.
+
 3) X/Twitter search loop (include online conversations context)
 
 - Keep the query short and specific (2-3 keywords).
@@ -40,5 +59,10 @@ See `references/mcpjose-tools.md` for a compact list of available tools and beha
 
 ## Output expectations
 
-- Provide a concise, structured result.
+- Provide a concise, structured result (lead with the newest items first).
 - Link to sources; do not dump large tool outputs.
+
+## Ambiguity handling (minimize token waste)
+
+- If the user's wording is ambiguous and could change the answer materially (e.g. "latest" could mean "this year" vs "last 5 releases"), do a quick recency-first pass (current year) and answer immediately.
+- Only ask a clarification question if the recency-first pass yields zero credible results.
