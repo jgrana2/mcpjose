@@ -66,41 +66,37 @@ class CredentialManager:
         return self._config
 
     def _load_config(self) -> Config:
-        """Load configuration from JSON files and environment variables.
+        """Load configuration strictly from environment variables natively."""
+        from dotenv import load_dotenv
 
-        Priority: Environment variables > credentials.json > google credentials
-        """
         repo_root = Path(__file__).resolve().parent.parent
+        env_path = repo_root / "auth" / ".env"
 
-        # Load main credentials file
-        credentials: Dict[str, Any] = {}
-        creds_path = repo_root / "auth" / "credentials.json"
-        if creds_path.exists():
-            with open(creds_path, "r", encoding="utf-8") as f:
-                credentials = json.load(f)
+        if env_path.exists():
+            load_dotenv(env_path)
 
-        # Set environment variables from credentials (if not already set)
-        for key, value in credentials.items():
-            if value and key not in os.environ:
-                os.environ[key] = str(value)
+        # Handle the bundled JSON credential string as a temp environment file for Vision natively
+        google_creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+        google_project_id = os.environ.get("GOOGLE_PROJECT_ID")
+        google_creds_path = None
 
-        # Load Google-specific credentials
-        google_creds_path = repo_root / "auth" / "google" / "vision-key.json"
-        google_project_id = None
-        if google_creds_path.exists():
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(google_creds_path)
-            with open(google_creds_path, "r", encoding="utf-8") as f:
-                google_creds = json.load(f)
-                google_project_id = google_creds.get("project_id")
+        if google_creds_json:
+            import tempfile
+
+            # Write a temporary credential file for SDK usage securely
+            fd, temp_path = tempfile.mkstemp(suffix=".json")
+            with os.fdopen(fd, 'w') as f:
+                f.write(google_creds_json)
+
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_path
+            google_creds_path = Path(temp_path)
 
         return Config(
             openai_api_key=os.environ.get("OPENAI_API_KEY"),
             google_api_key=os.environ.get("GOOGLE_API_KEY"),
             google_cse_id=os.environ.get("GOOGLE_CSE_ID"),
-            google_credentials_path=google_creds_path
-            if google_creds_path.exists()
-            else None,
-            google_project_id=google_project_id or os.environ.get("GOOGLE_PROJECT_ID"),
+            google_credentials_path=google_creds_path,
+            google_project_id=google_project_id,
             search_backend=os.environ.get("SEARCH_ENGINE", "ddgs").lower(),
             mp_access_token=os.environ.get("MP_ACCESS_TOKEN"),
             mp_public_key=os.environ.get("MP_PUBLIC_KEY"),
@@ -124,23 +120,14 @@ class CredentialManager:
         return key
 
     def ensure_google_credentials(self) -> Dict[str, Any]:
-        """Validate and return Google credentials.
-
-        Raises:
-            FileNotFoundError: If Google credentials file is missing.
-            RuntimeError: If project_id is not found in credentials.
-        """
+        """Validate and return Google credentials."""
         config = self.get_config()
-        if (
-            not config.google_credentials_path
-            or not config.google_credentials_path.exists()
-        ):
-            raise FileNotFoundError(
-                f"Google credentials not found at {config.google_credentials_path}"
-            )
+        # Fallback to check if GOOGLE_CREDENTIALS_JSON is in environment
+        if not config.google_credentials_path and not os.environ.get("GOOGLE_CREDENTIALS_JSON"):
+            raise FileNotFoundError("Google credentials JSON is missing from environment.")
 
         if not config.google_project_id:
-            raise RuntimeError("Google credentials missing project_id")
+            raise RuntimeError("Google credentials missing GOOGLE_PROJECT_ID")
 
         return {
             "project_id": config.google_project_id,

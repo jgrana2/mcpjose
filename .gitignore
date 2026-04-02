@@ -63,3 +63,5 @@ data/
 server_log.txt
 .playwright-cli/
 output/
+userapp/outputs/
+userapp/Plan/
