@@ -135,4 +135,4 @@ Instructions:
   }"
 
 echo "Executing task: $task_id"
-opencode run "$task_prompt"
+opencode --prompt "$task_prompt"
