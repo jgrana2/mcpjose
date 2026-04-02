@@ -13,6 +13,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from dotenv import load_dotenv
 
+from langchain_agent.tool_registry import extract_pdf_content
+
 from .agent import MCPJoseLangChainAgent
 
 try:
@@ -186,7 +188,15 @@ class WhatsAppAgentLoop:
             history = self.history_by_sender.get(sender, [])
 
             try:
-                output = self.agent.run(prompt, chat_history=history).strip()
+                original_default = os.environ.get("WHATSAPP_DEFAULT_DESTINATION")
+                try:
+                    os.environ["WHATSAPP_DEFAULT_DESTINATION"] = "+" + sender
+                    output = self.agent.run(prompt, chat_history=history).strip()
+                finally:
+                    if original_default is not None:
+                        os.environ["WHATSAPP_DEFAULT_DESTINATION"] = original_default
+                    elif "WHATSAPP_DEFAULT_DESTINATION" in os.environ:
+                        del os.environ["WHATSAPP_DEFAULT_DESTINATION"]
             except Exception as exc:
                 output = f"Agent error: {exc}"
 
@@ -249,7 +259,7 @@ class WhatsAppAgentLoop:
                 filename=filename,
             )
 
-        return f"<system>The user's verified phone number is: +{sender}</system>\n{base_prompt}"
+        return f"<system>The user's verified phone number is: +{sender}. IMPORTANT: You MUST use +{sender} as the `destination` for any WhatsApp messages.</system>\n{base_prompt}"
 
     def _transcribe_audio(self, media_id: str, sender: str = "") -> str:
         if not self.media_fetcher:
@@ -322,7 +332,7 @@ class WhatsAppAgentLoop:
         return ""
 
     def _call_vision_prompt(self, template: str, image_path: Path, prompt: str, sender: str = "") -> str:
-        phone_context = f"<system>The user's verified phone number is: +{sender}</system>\n" if sender else ""
+        phone_context = f"<system>The user's verified phone number is: +{sender}. IMPORTANT: You MUST use +{sender} as the `destination` for any WhatsApp messages.</system>\n" if sender else ""
         try:
             result = self.agent.invoke(
                 phone_context + template.format(path=image_path, prompt=prompt),
