@@ -30,6 +30,7 @@ class _Store:
 class _Agent:
     def __init__(self) -> None:
         self.calls: list[tuple[str, list[object]]] = []
+        self.tool_registry = self
 
     def run(self, user_input: str, chat_history=None) -> str:
         history = list(chat_history or [])
@@ -38,6 +39,11 @@ class _Agent:
 
     def invoke(self, user_input: str, chat_history=None):
         return {"output": f"vision: {user_input}"}
+
+    def call_tool(self, name: str, args: dict[str, object]):
+        if name == "transcribe_audio":
+            return {"text": f"transcript for {args['audio_path']}"}
+        return {"output": ""}
 
 
 class _Sender:
@@ -95,10 +101,42 @@ def test_poll_once_routes_new_messages_through_agent_and_reply_sender() -> None:
     handled = loop.poll_once()
 
     assert handled == 2
-    assert [call[0] for call in agent.calls] == ["First prompt", "Second prompt"]
+    assert [call[0].split("\n", 1)[1] for call in agent.calls] == ["First prompt", "Second prompt"]
     assert len(agent.calls[0][1]) == 0
     assert len(agent.calls[1][1]) == 2
-    assert sender.sent == [("573002612420", "reply: First prompt"), ("573002612420", "reply: Second prompt")]
+    assert sender.sent == [("573002612420", "reply: " + agent.calls[0][0]), ("573002612420", "reply: " + agent.calls[1][0])]
+
+
+def test_poll_once_allows_multiple_senders() -> None:
+    store = _Store(
+        [
+            _Message("seed", "573002612420", "seed", "2026-03-19T19:00:00"),
+            _Message("seed2", "573166275240", "seed", "2026-03-19T19:00:00"),
+        ]
+    )
+    agent = _Agent()
+    sender = _Sender()
+
+    loop = WhatsAppAgentLoop(
+        agent=agent,
+        store=store,
+        reply_sender=sender.send,
+        allowed_senders={"573002612420", "573166275240"},
+        scan_limit=10,
+    )
+
+    store.messages.extend(
+        [
+            _Message("m1", "573002612420", "First prompt", "2026-03-19T19:01:00"),
+            _Message("m2", "573166275240", "Second prompt", "2026-03-19T19:02:00"),
+        ]
+    )
+
+    handled = loop.poll_once()
+
+    assert handled == 2
+    assert [call[0].split("\n", 1)[1] for call in agent.calls] == ["First prompt", "Second prompt"]
+    assert sender.sent == [("573002612420", "reply: " + agent.calls[0][0]), ("573166275240", "reply: " + agent.calls[1][0])]
 
 
 def test_poll_once_continues_when_reply_sender_fails(caplog) -> None:
@@ -124,8 +162,8 @@ def test_poll_once_continues_when_reply_sender_fails(caplog) -> None:
     handled = loop.poll_once()
 
     assert handled == 0
-    assert [call[0] for call in agent.calls] == ["First prompt", "Second prompt"]
-    assert sender.calls == [("573002612420", "reply: First prompt"), ("573002612420", "reply: Second prompt")]
+    assert [call[0].split("\n", 1)[1] for call in agent.calls] == ["First prompt", "Second prompt"]
+    assert sender.calls == [("573002612420", "reply: " + agent.calls[0][0]), ("573002612420", "reply: " + agent.calls[1][0])]
     assert "Failed to send WhatsApp reply" in caplog.text
 
 
@@ -155,6 +193,14 @@ def test_poll_once_auto_analyzes_image_messages_with_fetcher() -> None:
             media_id="media-123",
         )
     )
+
+    handled = loop.poll_once()
+
+    assert handled == 1
+    assert fetcher.calls == ["media-123"]
+    assert "Image analysis result for WhatsApp media media-123" in agent.calls[0][0]
+    assert "Sender caption: Check this out" in agent.calls[0][0]
+    assert sender.sent == [("573002612420", "reply: " + agent.calls[0][0])]
 
 
 def test_poll_once_auto_transcribes_audio_messages_with_fetcher() -> None:
@@ -187,13 +233,5 @@ def test_poll_once_auto_transcribes_audio_messages_with_fetcher() -> None:
 
     assert handled == 1
     assert fetcher.calls == ["media-audio-123"]
-    assert "Audio transcription for WhatsApp media media-audio-123" in agent.calls[0][0]
-    assert sender.sent == [("573002612420", "reply: " + agent.calls[0][0])]
-
-    handled = loop.poll_once()
-
-    assert handled == 1
-    assert fetcher.calls == ["media-123"]
-    assert "Image analysis result for WhatsApp media media-123" in agent.calls[0][0]
-    assert "Sender caption: Check this out" in agent.calls[0][0]
+    assert "transcript for /tmp/whatsapp_audio.m4a" in agent.calls[0][0]
     assert sender.sent == [("573002612420", "reply: " + agent.calls[0][0])]

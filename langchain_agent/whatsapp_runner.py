@@ -38,6 +38,16 @@ def _normalize_number(value: str) -> str:
     return "".join(ch for ch in stripped if ch.isdigit())
 
 
+def _parse_allowed_senders(value: Optional[str]) -> set[str]:
+    if not value:
+        return set()
+    return {
+        _normalize_number(part)
+        for part in value.split(",")
+        if _normalize_number(part)
+    }
+
+
 @dataclass
 class WhatsAppReplySender:
     """Send assistant replies over WhatsApp."""
@@ -83,7 +93,6 @@ class WhatsAppMediaFetcher:
         out_dir.mkdir(parents=True, exist_ok=True)
         mime_type = meta.get("mime_type", "application/octet-stream")
 
-        # If caller provided the original filename, use it directly
         if filename:
             path = out_dir / f"whatsapp_{media_id}_{filename}"
             path.write_bytes(resp.content)
@@ -133,6 +142,7 @@ class WhatsAppAgentLoop:
     reply_sender: Callable[[str, str], Dict[str, Any]]
     media_fetcher: Optional[WhatsAppMediaFetcher] = None
     allowed_sender: Optional[str] = None
+    allowed_senders: set[str] = field(default_factory=set)
     poll_seconds: int = 3
     history_turn_limit: int = 12
     scan_limit: int = 200
@@ -141,7 +151,10 @@ class WhatsAppAgentLoop:
 
     def __post_init__(self) -> None:
         if self.allowed_sender:
-            self.allowed_sender = _normalize_number(self.allowed_sender)
+            self.allowed_senders.add(_normalize_number(self.allowed_sender))
+        self.allowed_senders = {
+            _normalize_number(sender) for sender in self.allowed_senders if sender
+        }
         if not self.seen_ids:
             self.seen_ids = {
                 message.id for message in self.store.get_recent(limit=self.scan_limit)
@@ -163,7 +176,7 @@ class WhatsAppAgentLoop:
             self.seen_ids.add(message.id)
 
             sender = _normalize_number(message.from_number)
-            if self.allowed_sender and sender != self.allowed_sender:
+            if self.allowed_senders and sender not in self.allowed_senders:
                 continue
 
             prompt = self._build_prompt(message)
@@ -349,7 +362,6 @@ class WhatsAppAgentLoop:
         suffix = file_path.suffix.lower()
         content_summary = ""
 
-        # PDF — use existing navigation extraction
         if suffix == ".pdf":
             try:
                 content_summary = extract_pdf_content(str(file_path))
@@ -358,7 +370,6 @@ class WhatsAppAgentLoop:
             except Exception as exc:
                 logger.warning("PDF extraction failed for %s: %s", file_path, exc)
 
-        # Plain text / CSV / JSON
         elif suffix in {".txt", ".csv", ".json", ".md", ".log", ".xml", ".html"}:
             try:
                 content_summary = file_path.read_text(errors="replace")[:8000]
@@ -390,7 +401,6 @@ class WhatsAppAgentLoop:
         caption: str = "",
         filename: Optional[str] = None,
     ) -> str:
-        """Build a prompt for unsupported media types (e.g. video)."""
         parts = [f"The user sent a {media_type} via WhatsApp (media_id={media_id})."]
         if filename:
             parts.append(f"Original filename: {filename}")
@@ -452,6 +462,7 @@ def run_whatsapp_loop(
     max_iterations: int = 12,
     verbose: bool = False,
     allowed_sender: Optional[str] = None,
+    allowed_senders: Optional[str] = None,
     poll_seconds: int = 3,
     repo_root: Optional[Path] = None,
 ) -> None:
@@ -469,12 +480,20 @@ def run_whatsapp_loop(
     )
     store = get_message_store()
     reply_sender = build_reply_sender()
+    configured_senders = _parse_allowed_senders(
+        allowed_senders or os.getenv("WHATSAPP_ALLOWED_SENDERS")
+    )
+    if allowed_sender:
+        configured_senders.add(_normalize_number(allowed_sender))
+    fallback_sender = os.getenv("WHATSAPP_DEFAULT_DESTINATION")
+    if fallback_sender and not configured_senders:
+        configured_senders.add(_normalize_number(fallback_sender))
     loop = WhatsAppAgentLoop(
         agent=agent,
         store=store,
         reply_sender=reply_sender.send,
         media_fetcher=build_media_fetcher(),
-        allowed_sender=allowed_sender or os.getenv("WHATSAPP_DEFAULT_DESTINATION"),
+        allowed_senders=configured_senders,
         poll_seconds=poll_seconds,
     )
     loop.run_forever()
@@ -496,6 +515,11 @@ def main() -> int:
         help="Only process messages from this WhatsApp number.",
     )
     parser.add_argument(
+        "--allowed-senders",
+        default=None,
+        help="Comma-separated list of WhatsApp numbers allowed to trigger the agent.",
+    )
+    parser.add_argument(
         "--poll-seconds", type=int, default=3, help="Polling interval in seconds"
     )
     args = parser.parse_args()
@@ -507,6 +531,7 @@ def main() -> int:
             max_iterations=args.max_iterations,
             verbose=args.verbose,
             allowed_sender=args.allowed_sender,
+            allowed_senders=args.allowed_senders,
             poll_seconds=args.poll_seconds,
         )
         return 0
