@@ -19,6 +19,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.utils import load_text_file  # noqa: E402
 from langchain_agent.tool_registry import ProjectToolRegistry  # noqa: E402
 
+try:
+    from cli_workflow import add_workflow_parser, handle_workflow_command
+
+    _HAS_WORKFLOW = True
+except ImportError:
+    _HAS_WORKFLOW = False
+
+try:
+    from cli_team import add_team_parser, handle_team_command
+
+    _HAS_TEAM = True
+except ImportError:
+    _HAS_TEAM = False
+
 
 def _create_registry() -> ProjectToolRegistry:
     return ProjectToolRegistry(repo_root=Path(__file__).resolve().parent)
@@ -70,7 +84,9 @@ def _load_ocr_context(ocr_context: str | None, ocr_file: str | None) -> str | No
     return ocr_context
 
 
-def _write_output_file(path: str, content: Any, message: str = "Saved to {path}") -> None:
+def _write_output_file(
+    path: str, content: Any, message: str = "Saved to {path}"
+) -> None:
     Path(path).write_text(str(content), encoding="utf-8")
     print(message.format(path=path))
 
@@ -280,7 +296,9 @@ def build_parser() -> argparse.ArgumentParser:
     tool_parser = subparsers.add_parser(
         "tool", help="Call tools from the shared MCP Jose registry"
     )
-    tool_subparsers = tool_parser.add_subparsers(dest="tool_command", help="Tool commands")
+    tool_subparsers = tool_parser.add_subparsers(
+        dest="tool_command", help="Tool commands"
+    )
 
     tool_subparsers.add_parser("list", help="List all shared tools")
 
@@ -304,11 +322,21 @@ def build_parser() -> argparse.ArgumentParser:
     webhook_parser = subparsers.add_parser(
         "webhook", help="Run webhook server (WhatsApp + MercadoPago)"
     )
-    webhook_parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
-    webhook_parser.add_argument("--port", type=int, default=5000, help="Port to bind to (default: 5000)")
-    webhook_parser.add_argument("--db-path", default=None, help="Path to SQLite database")
+    webhook_parser.add_argument(
+        "--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)"
+    )
+    webhook_parser.add_argument(
+        "--port", type=int, default=5000, help="Port to bind to (default: 5000)"
+    )
+    webhook_parser.add_argument(
+        "--db-path", default=None, help="Path to SQLite database"
+    )
 
+    if _HAS_WORKFLOW:
+        add_workflow_parser(subparsers)
 
+    if _HAS_TEAM:
+        add_team_parser(subparsers)
 
     return parser
 
@@ -345,6 +373,12 @@ def main() -> int:
         tool_help = build_parser()._subparsers._group_actions[0].choices["tool"]
         tool_help.print_help()
         return 1
+
+    if args.command == "workflow" and _HAS_WORKFLOW:
+        return handle_workflow_command(args)
+
+    if args.command == "team" and _HAS_TEAM:
+        return handle_team_command(args)
 
     if args.command == "webhook":
         from tools.webhook_server import run_webhook_server

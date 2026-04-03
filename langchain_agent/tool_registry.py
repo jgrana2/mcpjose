@@ -101,16 +101,20 @@ class ProjectToolRegistry:
     def _get_guard(self):
         if self._guard is None:
             from core.guard import SubscriptionGuard
+
             self._guard = SubscriptionGuard()
         return self._guard
 
     def _get_payment_gateway(self):
         if self._payment_gateway is None:
             from tools.payment_gateway import PaymentGatewayTool
+
             self._payment_gateway = PaymentGatewayTool()
         return self._payment_gateway
 
-    def _check_premium_access(self, phone_number: Optional[str]) -> Optional[Dict[str, str]]:
+    def _check_premium_access(
+        self, phone_number: Optional[str]
+    ) -> Optional[Dict[str, str]]:
         """Return an error dict if the user lacks an active subscription, else None.
 
         Generates a checkout link and embeds it in the denial message so users
@@ -128,7 +132,9 @@ class ProjectToolRegistry:
         except Exception:
             pass
 
-        error_msg = self._get_guard().check_access(normalized, checkout_url=checkout_url)
+        error_msg = self._get_guard().check_access(
+            normalized, checkout_url=checkout_url
+        )
         if error_msg:
             return {"error": error_msg}
         return None
@@ -195,6 +201,164 @@ class ProjectToolRegistry:
             "truncated": truncated,
             "total_chars": len(content),
         }
+
+    # Agent delegation tools
+    def delegate_to_agent(
+        self,
+        agent_name: str,
+        plan_dir: str,
+        workflow_id: Optional[str] = None,
+        state_dir: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Delegate workflow execution to a predefined internal agent.
+
+        The LangChain agent can use this tool to hand off multi-step plans to a
+        specialized executor implementation by name.
+
+        Currently supported agent names:
+        - ``basic_workflow_executor`` (runs ``AtomicTasks.json``/``TaskTree.json``)
+        """
+        normalized = (agent_name or "").strip()
+        if not normalized:
+            return {"error": "agent_name is required."}
+
+        workflow_id_final = (workflow_id or "").strip()
+        if not workflow_id_final:
+            workflow_id_final = f"workflow_{int(datetime.now().timestamp())}"
+
+        state_path = Path(state_dir) if state_dir else Path("workflows")
+        plan_path = Path(plan_dir)
+
+        if normalized == "basic_workflow_executor":
+            try:
+                from mcp_server.workflow_executor import BasicWorkflowExecutor
+            except ImportError as exc:
+                return {
+                    "error": "basic_workflow_executor is not available.",
+                    "details": str(exc),
+                }
+
+            executor = BasicWorkflowExecutor(
+                registry=self,
+                state_dir=state_path,
+            )
+            try:
+                return executor.execute_workflow(
+                    workflow_id=workflow_id_final,
+                    plan_dir=plan_path,
+                )
+            except Exception as exc:  # pragma: no cover - delegated failure path
+                return {"error": f"delegate_to_agent failed: {exc}"}
+
+        available_agents = ["basic_workflow_executor"]
+        return {
+            "error": f"Unknown agent '{normalized}'.",
+            "available_agents": available_agents,
+        }
+
+    # Agent Team / Agentic OS tools
+    def spawn_agent(
+        self,
+        team_id: str,
+        agent_type: str,
+        role: str,
+        task_id: str,
+        work_dir: Optional[str] = None,
+        plan_mode: bool = True,
+        timeout_minutes: int = 30,
+    ) -> Dict[str, Any]:
+        """Spawn a new agent in a team to work on a task."""
+        from tools.agent_spawner import spawn_agent
+
+        return spawn_agent(
+            team_id=team_id,
+            agent_type=agent_type,
+            role=role,
+            task_id=task_id,
+            work_dir=work_dir,
+            plan_mode=plan_mode,
+            timeout_minutes=timeout_minutes,
+        )
+
+    def spawn_agent_team(
+        self,
+        team_id: str,
+        plan_dir: str,
+        work_dir: Optional[str] = None,
+        max_parallel: int = 5,
+    ) -> Dict[str, Any]:
+        """Spawn a complete team from a DECOMPOSITION.md plan."""
+        from tools.agent_spawner import spawn_agent_team
+
+        return spawn_agent_team(
+            team_id=team_id,
+            plan_dir=plan_dir,
+            work_dir=work_dir,
+            max_parallel=max_parallel,
+        )
+
+    def get_team_status(
+        self,
+        team_id: str,
+        work_dir: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Get the status of an agent team."""
+        from tools.agent_spawner import get_team_status
+
+        return get_team_status(team_id, work_dir)
+
+    def send_message_to_agent(
+        self,
+        team_id: str,
+        from_agent: str,
+        to_agent: str,
+        message_type: str,
+        content: str,
+        work_dir: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Send a message to an agent in a team."""
+        from tools.agent_spawner import send_message_to_agent
+
+        return send_message_to_agent(
+            team_id=team_id,
+            from_agent=from_agent,
+            to_agent=to_agent,
+            message_type=message_type,
+            content=content,
+            work_dir=work_dir,
+        )
+
+    def wait_for_team(
+        self,
+        team_id: str,
+        poll_interval: float = 5.0,
+        timeout: Optional[float] = None,
+        work_dir: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Wait for all tasks in a team to complete."""
+        from tools.agent_spawner import wait_for_team
+
+        return wait_for_team(
+            team_id=team_id,
+            poll_interval=poll_interval,
+            timeout=timeout,
+            work_dir=work_dir,
+        )
+
+    def shutdown_team(
+        self,
+        team_id: str,
+        graceful: bool = True,
+        work_dir: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Shutdown all agents in a team."""
+        from tools.agent_spawner import shutdown_team
+
+        return shutdown_team(
+            team_id=team_id,
+            graceful=graceful,
+            work_dir=work_dir,
+        )
 
     # Memory tools
     def save_memory(
@@ -380,14 +544,18 @@ class ProjectToolRegistry:
         try:
             endpoint_url = "https://api.twitter.com/1.1/trends/place.json"
             params = {"id": woeid}
-            async with QueueClient(api.pool, queue="TrendsPlace", proxy=api.proxy) as client:
+            async with QueueClient(
+                api.pool, queue="TrendsPlace", proxy=api.proxy
+            ) as client:
                 response = await client.get(endpoint_url, params=params)
 
             if response is not None:
                 payload = response.json()
                 normalized = self._normalize_v1_trends(payload=payload, limit=limit)
                 if normalized:
-                    metadata = payload[0] if isinstance(payload, list) and payload else {}
+                    metadata = (
+                        payload[0] if isinstance(payload, list) and payload else {}
+                    )
                     locations = metadata.get("locations") or []
                     return {
                         "country": country,
@@ -502,7 +670,9 @@ class ProjectToolRegistry:
         }
 
     # AI tools
-    def call_llm(self, prompt: str, phone_number: Optional[str] = None) -> Dict[str, str]:
+    def call_llm(
+        self, prompt: str, phone_number: Optional[str] = None
+    ) -> Dict[str, str]:
         """Generate text with the OpenAI LLM provider."""
         access_error = self._check_premium_access(phone_number)
         if access_error:
@@ -807,7 +977,11 @@ class ProjectToolRegistry:
                         rate_limit_remaining=rate.remaining,
                     ).to_dict()
                 source_path = Path(media_source)
-                resolved_mime = mime_type or mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+                resolved_mime = (
+                    mime_type
+                    or mimetypes.guess_type(source_path.name)[0]
+                    or "application/octet-stream"
+                )
                 media_id = client.upload_media(media_source, mime_type=mime_type)
                 result = client.send_media_message(
                     normalized,
@@ -1126,11 +1300,52 @@ class ProjectToolRegistry:
             ("read_agents_md", "Read AGENTS.md instructions.", self.read_agents_md),
             ("list_skills", "List all discovered project skills.", self.list_skills),
             ("read_skill", "Read a skill by name or skill_id.", self.read_skill),
+            (
+                "delegate_to_agent",
+                "Delegate workflow execution to a predefined internal agent by name "
+                "(agent_name). Use this for higher-level orchestration like executing "
+                "workflow plans. Currently supports agent_name='basic_workflow_executor'.",
+                self.delegate_to_agent,
+            ),
             ("save_memory", "Save interaction to long-term memory.", self.save_memory),
             (
                 "query_memory",
                 "Query long-term memory using semantic search.",
                 self.query_memory,
+            ),
+            # Agent Team / Agentic OS tools
+            (
+                "spawn_agent",
+                "Spawn a new agent in a team to work on a specific task. "
+                "agent_type can be 'opencode', 'claude_code', or 'langchain_subagent'. "
+                "role should describe the agent's function (e.g., 'business_analyst', 'tech_lead').",
+                self.spawn_agent,
+            ),
+            (
+                "spawn_agent_team",
+                "Spawn a complete team from a DECOMPOSITION.md plan directory. "
+                "Automatically assigns roles and spawns agents for multiple tasks.",
+                self.spawn_agent_team,
+            ),
+            (
+                "get_team_status",
+                "Get the status of an agent team including task progress and agent statuses.",
+                self.get_team_status,
+            ),
+            (
+                "send_message_to_agent",
+                "Send a message to an agent in a team. Use 'broadcast' as to_agent to message all.",
+                self.send_message_to_agent,
+            ),
+            (
+                "wait_for_team",
+                "Wait for all tasks in a team to complete. Blocks until done or timeout.",
+                self.wait_for_team,
+            ),
+            (
+                "shutdown_team",
+                "Shutdown all agents in a team gracefully or forcefully.",
+                self.shutdown_team,
             ),
         ]
 

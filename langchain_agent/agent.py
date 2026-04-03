@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -144,15 +145,230 @@ class MCPJoseLangChainAgent:
         """Return discovered skills metadata."""
         return self.tool_registry.list_skills()
 
+    def orchestrate_team(
+        self,
+        user_request: str,
+        team_id: Optional[str] = None,
+        use_plan_dir: Optional[str] = None,
+        max_parallel: int = 5,
+    ) -> Dict[str, Any]:
+        """Orchestrate a cross-functional agent team to execute a request.
+
+        This is the main entry point for Agentic OS team execution. It can either:
+        1. Load an existing plan from use_plan_dir
+        2. Generate a plan dynamically using DECOMPOSITION.md
+
+        Args:
+            user_request: The user's request to fulfill.
+            team_id: Unique identifier for this team (generated if not provided).
+            use_plan_dir: Optional path to existing Plan/ directory.
+            max_parallel: Maximum agents to run in parallel.
+
+        Returns:
+            Dictionary with execution results.
+        """
+        from core.agent_team import AgentTeamCoordinator, AgentType
+        from tools.agent_spawner import (
+            spawn_agent_team,
+            wait_for_team,
+            get_team_status,
+        )
+
+        team_id = team_id or f"team_{int(datetime.now().timestamp())}"
+
+        if use_plan_dir:
+            # Use existing plan
+            result = spawn_agent_team(
+                team_id=team_id,
+                plan_dir=use_plan_dir,
+                max_parallel=max_parallel,
+            )
+        else:
+            # Generate plan dynamically using DECOMPOSITION skill
+            plan = self._generate_decomposition_plan(user_request)
+
+            # Create coordinator with dynamic plan
+            coordinator = AgentTeamCoordinator(team_id)
+            coordinator.create_dynamic_plan(user_request, plan["atomic_tasks"])
+
+            # Spawn agents for each task
+            spawned = []
+            for task in plan["atomic_tasks"][:max_parallel]:
+                role = self._determine_role(
+                    task["action"], task.get("tool_or_endpoint", "")
+                )
+                agent_type = self._select_agent_type(task)
+
+                try:
+                    agent = coordinator.spawn_agent(agent_type, role, task["task_id"])
+                    spawned.append(
+                        {
+                            "agent_id": agent.agent_id,
+                            "role": role,
+                            "task_id": task["task_id"],
+                        }
+                    )
+                except Exception as e:
+                    spawned.append(
+                        {
+                            "task_id": task["task_id"],
+                            "error": str(e),
+                        }
+                    )
+
+            result = {
+                "success": True,
+                "team_id": team_id,
+                "spawned_agents": spawned,
+            }
+
+        if not result.get("success"):
+            return result
+
+        # Wait for completion
+        wait_result = wait_for_team(team_id)
+
+        return {
+            "team_id": team_id,
+            "plan_result": result,
+            "execution_result": wait_result,
+        }
+
+    def _generate_decomposition_plan(self, user_request: str) -> Dict[str, Any]:
+        """Generate a plan using DECOMPOSITION.md framework."""
+        # Use call_llm to generate the plan
+        decomposition_prompt = f"""You are a task decomposition specialist.
+
+Read the DECOMPOSITION.md framework and generate a complete plan for this request:
+
+USER REQUEST:
+{user_request}
+
+Generate:
+1. A task tree with hierarchical IDs (1, 1.1, 1.1.1, etc.)
+2. Atomic tasks for all leaf nodes
+
+Return a JSON object with:
+{{
+    "reasoning": "Brief reasoning chain",
+    "task_tree": [...],
+    "atomic_tasks": [
+        {{
+            "task_id": "1.1.1",
+            "parent_id": "1.1",
+            "depth": 2,
+            "action": "Description of what to do",
+            "exact_inputs": [...],
+            "exact_outputs": [...],
+            "tool_or_endpoint": "Tool to use",
+            "validation_check": "How to validate",
+            "dependencies": [...]
+        }}
+    ]
+}}
+"""
+
+        # Use the registry to call LLM
+        response = self.tool_registry.call_llm({"prompt": decomposition_prompt})
+
+        # Parse the JSON from response
+        import json
+        import re
+
+        text = response.get("text", "")
+
+        # Extract JSON from markdown code blocks if present
+        json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+        if json_match:
+            text = json_match.group(1)
+
+        try:
+            plan = json.loads(text)
+            return plan
+        except json.JSONDecodeError:
+            # Return a simple fallback plan
+            return {
+                "atomic_tasks": [
+                    {
+                        "task_id": "1.1",
+                        "parent_id": "1",
+                        "depth": 1,
+                        "action": user_request,
+                        "exact_inputs": [],
+                        "exact_outputs": ["result"],
+                        "tool_or_endpoint": "call_llm",
+                        "validation_check": "Output is present",
+                        "dependencies": [],
+                    }
+                ]
+            }
+
+    def _determine_role(self, action: str, tool_or_endpoint: str) -> str:
+        """Determine agent role based on task."""
+        action_lower = action.lower()
+
+        if any(w in action_lower for w in ["business", "requirements", "stakeholder"]):
+            return "business_analyst"
+        if any(w in action_lower for w in ["code", "implement", "develop", "refactor"]):
+            return "tech_lead"
+        if any(w in action_lower for w in ["test", "qa", "validate", "verify"]):
+            return "qa_engineer"
+        if any(w in action_lower for w in ["deploy", "infra", "pipeline", "devops"]):
+            return "devops_engineer"
+        if any(w in action_lower for w in ["research", "investigate", "explore"]):
+            return "researcher"
+        if any(w in action_lower for w in ["design", "ux", "ui", "interface"]):
+            return "ux_designer"
+
+        return "generalist"
+
+    def _select_agent_type(self, task: Dict[str, Any]) -> AgentType:
+        """Select appropriate agent type for a task."""
+        action = task.get("action", "").lower()
+
+        # Complex development tasks -> External agents
+        if any(w in action for w in ["implement", "refactor", "code review", "build"]):
+            # Prefer OpenCode for coding tasks
+            try:
+                from tools.agent_spawner.opencode_adapter import OpenCodeAdapter
+
+                OpenCodeAdapter()
+                return AgentType.OPENCODE
+            except RuntimeError:
+                pass
+
+            try:
+                from tools.agent_spawner.claude_code_adapter import ClaudeCodeAdapter
+
+                ClaudeCodeAdapter()
+                return AgentType.CLAUDE_CODE
+            except RuntimeError:
+                pass
+
+        # Default to in-process LangChain subagent
+        return AgentType.LANGCHAIN_SUBAGENT
+
     @staticmethod
     def _build_system_prompt(context_block: str) -> str:
         return (
-            "You are MCP Jose's LangChain agent.\n"
+            "You are MCP Jose's LangChain agent - an Agentic OS orchestrator.\n"
             "You MUST use project tools when external actions or data access are needed.\n"
             "Follow AGENTS.md guidance and use project skills when relevant.\n"
             "Consult MEMORY.md guidance for persistent preferences, prior decisions, and project conventions.\n"
             "Use query_memory to recover relevant past context and save_memory to persist useful summaries.\n"
-            "If a request touches project workflows, call read_agents_md and read_skill.\n"
+            "If a request touches project workflows, call read_agents_md and read_skill.\n\n"
+            "## Agent Team Orchestration (Agentic OS)\n"
+            "You can orchestrate cross-functional agent teams for complex tasks:\n"
+            "- Use `spawn_agent` to spawn individual agents (opencode, claude_code, langchain_subagent)\n"
+            "- Use `spawn_agent_team` to spawn a complete team from a Plan/ directory\n"
+            "- Use `get_team_status` to check progress\n"
+            "- Use `send_message_to_agent` to communicate with team members\n"
+            "- Use `wait_for_team` to wait for completion\n"
+            "- Use `shutdown_team` to gracefully stop all agents\n"
+            "- Use `orchestrate_team()` method for full end-to-end orchestration\n\n"
+            "## Legacy Delegation\n"
+            "You can also delegate to predefined internal agents using `delegate_to_agent`.\n"
+            "Predefined agent names: basic_workflow_executor.\n\n"
             "Always prefer factual tool outputs over assumptions.\n\n"
             f"{context_block}"
         )
