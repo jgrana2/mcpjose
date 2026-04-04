@@ -262,7 +262,8 @@ class ProjectToolRegistry:
         team_id: str,
         agent_type: str,
         role: str,
-        task_id: str,
+        task_id: Optional[str] = None,
+        action: Optional[str] = None,
         work_dir: Optional[str] = None,
         plan_mode: bool = True,
         timeout_minutes: int = 30,
@@ -275,6 +276,7 @@ class ProjectToolRegistry:
             agent_type=agent_type,
             role=role,
             task_id=task_id,
+            action=action,
             work_dir=work_dir,
             plan_mode=plan_mode,
             timeout_minutes=timeout_minutes,
@@ -1318,7 +1320,8 @@ class ProjectToolRegistry:
                 "spawn_agent",
                 "Spawn a new agent in a team to work on a specific task. "
                 "agent_type can be 'opencode', 'claude_code', or 'langchain_subagent'. "
-                "role should describe the agent's function (e.g., 'business_analyst', 'tech_lead').",
+                "role should describe the agent's function (e.g., 'business_analyst', 'tech_lead'). "
+                "Provide action to create a task on-the-fly without needing AtomicTasks.json.",
                 self.spawn_agent,
             ),
             (

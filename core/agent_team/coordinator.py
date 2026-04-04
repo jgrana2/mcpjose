@@ -204,6 +204,7 @@ class AgentTeamCoordinator:
             role=role,
             task=task.to_dict(),
             work_dir=agent_work_dir,
+            on_complete=self._on_agent_complete,
             **kwargs,
         )
 
@@ -233,6 +234,17 @@ class AgentTeamCoordinator:
         )
 
         return agent
+
+    def _on_agent_complete(
+        self, agent_id: str, task_id: str, result: Dict[str, Any]
+    ) -> None:
+        """Callback when an agent completes its task."""
+        status = result.get("status", "completed")
+        if status == "completed":
+            self.complete_task(agent_id, task_id, result)
+        else:
+            error_msg = result.get("error", "Task failed")
+            self.fail_task(agent_id, task_id, error_msg)
 
     def spawn_agents_parallel(
         self,
@@ -414,12 +426,14 @@ class AgentTeamCoordinator:
         self,
         poll_interval: float = 5.0,
         timeout: Optional[float] = None,
+        verbose: bool = False,
     ) -> Dict[str, Any]:
         """Wait for all tasks to complete.
 
         Args:
             poll_interval: Seconds between status checks.
             timeout: Maximum seconds to wait (None = forever).
+            verbose: If True, print progress updates.
 
         Returns:
             Final progress summary.
@@ -427,16 +441,41 @@ class AgentTeamCoordinator:
         import time
 
         start_time = time.time()
+        last_progress = None
+
         while True:
             progress = self.get_progress()
             tasks = progress["tasks"]
 
+            # Print progress if changed and verbose
+            if verbose and tasks != last_progress:
+                print(
+                    f"[{datetime.now().strftime('%H:%M:%S')}] "
+                    f"Progress: {tasks['completed']}/{tasks['total']} completed, "
+                    f"{tasks.get('in_progress', 0)} in_progress, "
+                    f"{tasks.get('pending', 0)} pending"
+                    + (
+                        f", {tasks['failed']} failed"
+                        if tasks.get("failed", 0) > 0
+                        else ""
+                    )
+                )
+                last_progress = tasks.copy()
+
             # Check if done
             if tasks["completed"] + tasks["failed"] >= tasks["total"]:
+                if verbose:
+                    print(
+                        f"[{datetime.now().strftime('%H:%M:%S')}] "
+                        f"All tasks completed. {tasks['completed']}/{tasks['total']} done, "
+                        f"{tasks['failed']} failed."
+                    )
                 break
 
             # Check timeout
             if timeout and (time.time() - start_time) > timeout:
+                if verbose:
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Timeout reached.")
                 break
 
             time.sleep(poll_interval)

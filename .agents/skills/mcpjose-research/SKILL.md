@@ -26,17 +26,19 @@ See `references/mcpjose-tools.md` for a compact list of available tools and beha
 - For each selected result, run `navigate_to_url` and extract only the key parts.
 - Synthesize an answer. Include a short "Sources" list with URLs.
 
-2a) Recency-first queries (when user says "latest", "new", "recent", "this year")
+2a) Recency-first queries (when user says "latest", "new", "recent", "this year", "current")
 
-- Default interpretation: "this year" = current calendar year; "latest" = prioritize the current year first, then fall back to the last 12 months if needed.
+- CRITICAL: NEVER append prior years like "2024" or "2025" to your search queries. Always use the absolute current year (2026) to ensure true recency.
+- Default interpretation: "this year" or "current" = current calendar year (2026); "latest" = strictly search for the current year. DO NOT fallback to the last 12 months or append previous years (e.g., 2024, 2025) unless explicitly instructed.
 - Start with time-bounded queries (add the year and/or month): e.g. `"<brand>" "<product line>" 2026`, `site:<brand-domain> <product> 2026`, `<event> 2026 <brand> <product>`.
 - Prefer primary sources for the final list:
   - Official product pages (e.g. `site:<brand-domain>/<product-slug-prefix>`)
   - Official news/press posts if available
   - Reputable industry press for announcement dates/pricing when official pages lack dates
-- If results are noisy, pivot queries rather than broadening time:
+- If results are missing or noisy, pivot queries rather than broadening time:
   - Add a specific model keyword (e.g. `"<model name>"`)
   - Use `site:` constraints for manufacturer + 1-2 major outlets
+  - STRICTLY MAINTAIN the current year constraint. Do not revert to past years.
 
 2b) Product-page discovery pattern (for "list models" requests)
 

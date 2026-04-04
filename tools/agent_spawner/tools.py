@@ -6,8 +6,9 @@ These tools allow the LangChain agent to spawn and manage agent teams.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from core.agent_team import AgentTeamCoordinator, AgentType
 from tools.agent_spawner.claude_code_adapter import ClaudeCodeAdapter
@@ -50,7 +51,8 @@ def spawn_agent(
     team_id: str,
     agent_type: str,
     role: str,
-    task_id: str,
+    task_id: Optional[str] = None,
+    action: Optional[str] = None,
     work_dir: Optional[str] = None,
     plan_mode: bool = True,
     timeout_minutes: int = 30,
@@ -61,7 +63,8 @@ def spawn_agent(
         team_id: Unique identifier for the team.
         agent_type: Type of agent to spawn ("opencode", "claude_code", "langchain_subagent").
         role: Role this agent plays (e.g., "business_analyst", "tech_lead", "qa_engineer").
-        task_id: The task ID from the task board to assign to this agent.
+        task_id: The task ID from the task board. If not provided, a task will be created.
+        action: The action/description for a new task. Required if task_id not provided.
         work_dir: Directory for team state (default: workflows/{team_id}).
         plan_mode: If True, spawn in plan mode for safety.
         timeout_minutes: Maximum time agent can run.
@@ -73,8 +76,8 @@ def spawn_agent(
         spawn_agent(
             team_id="project_alpha",
             agent_type="opencode",
-            role="business_analyst",
-            task_id="1.1.1",
+            role="developer",
+            action="Fix bug in auth.py",
         )
     """
     try:
@@ -88,6 +91,24 @@ def spawn_agent(
 
     try:
         coordinator = _get_coordinator(team_id, work_dir)
+
+        # Create task on-the-fly if action provided or task_id not found
+        if action:
+            from core.agent_team import Task
+
+            if not task_id:
+                task_id = f"task_{int(datetime.now().timestamp())}"
+            task = Task(
+                task_id=task_id,
+                action=action,
+                depth=0,
+                parent_id=None,
+            )
+            try:
+                coordinator.task_board.add_task(task)
+            except ValueError:
+                pass  # Task already exists
+
         agent = coordinator.spawn_agent(
             agent_type=agent_type_enum,
             role=role,
@@ -255,6 +276,7 @@ def wait_for_team(
     poll_interval: float = 5.0,
     timeout: Optional[float] = None,
     work_dir: Optional[str] = None,
+    verbose: bool = False,
 ) -> Dict[str, Any]:
     """Wait for all tasks in a team to complete.
 
@@ -263,13 +285,16 @@ def wait_for_team(
         poll_interval: Seconds between status checks.
         timeout: Maximum seconds to wait (None = forever).
         work_dir: Directory for team state.
+        verbose: If True, print progress updates.
 
     Returns:
             Dictionary with final results.
     """
     try:
         coordinator = _get_coordinator(team_id, work_dir)
-        progress = coordinator.wait_for_completion(poll_interval, timeout)
+        progress = coordinator.wait_for_completion(
+            poll_interval, timeout, verbose=verbose
+        )
         results = coordinator.get_results()
 
         return {

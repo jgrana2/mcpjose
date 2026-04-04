@@ -167,7 +167,8 @@ class MCPJoseLangChainAgent:
         Returns:
             Dictionary with execution results.
         """
-        from core.agent_team import AgentTeamCoordinator, AgentType
+        from core.agent_team import AgentTeamCoordinator
+        from core.agent_team.adapter import AgentType
         from tools.agent_spawner import (
             spawn_agent_team,
             wait_for_team,
@@ -188,7 +189,14 @@ class MCPJoseLangChainAgent:
             plan = self._generate_decomposition_plan(user_request)
 
             # Create coordinator with dynamic plan
-            coordinator = AgentTeamCoordinator(team_id)
+            from pathlib import Path
+            from tools.agent_spawner.langchain_adapter import LangChainSubagentAdapter
+
+            coordinator = AgentTeamCoordinator(team_id, Path(f"workflows/{team_id}"))
+
+            # Register adapters
+            coordinator.register_adapter(LangChainSubagentAdapter())
+
             coordinator.create_dynamic_plan(user_request, plan["atomic_tasks"])
 
             # Spawn agents for each task
@@ -322,8 +330,10 @@ Return a JSON object with:
 
         return "generalist"
 
-    def _select_agent_type(self, task: Dict[str, Any]) -> AgentType:
+    def _select_agent_type(self, task: Dict[str, Any]):
         """Select appropriate agent type for a task."""
+        from core.agent_team.adapter import AgentType
+
         action = task.get("action", "").lower()
 
         # Complex development tasks -> External agents

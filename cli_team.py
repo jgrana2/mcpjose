@@ -19,6 +19,134 @@ if TYPE_CHECKING:
     import argparse
 
 
+def _print_team_result(result: Dict[str, Any], request: str) -> None:
+    """Print formatted team creation result."""
+    print("\n" + "=" * 60)
+    print("📋 TEAM CREATION RESULT")
+    print("=" * 60)
+    print(f"📝 Request: {request}")
+    print(f"🔑 Team ID: {result.get('team_id', 'N/A')}")
+    print(f"✅ Success: {'Yes' if result.get('success') else 'No'}")
+
+    # Plan result
+    plan_result = result.get("plan_result", {})
+    if plan_result:
+        print("\n📊 Plan Result:")
+        print(f"   Success: {'Yes' if plan_result.get('success') else 'No'}")
+
+        spawned = plan_result.get("spawned_agents", [])
+        if spawned:
+            print(f"   Agents spawned: {len(spawned)}")
+            for agent in spawned:
+                if "error" in agent:
+                    print(f"   ❌ {agent['task_id']}: {agent['error']}")
+                else:
+                    print(f"   ✅ {agent['agent_id']} ({agent['role']})")
+
+    # Execution result (initial status before wait)
+    exec_result = result.get("execution_result", {})
+    if exec_result:
+        print("\n⚡ Initial Status:")
+        if "success" in exec_result:
+            print(f"   Coordinator ready: {'Yes' if exec_result['success'] else 'No'}")
+        if "error" in exec_result:
+            print(f"   ❌ Error: {exec_result['error']}")
+
+    print("\n" + "=" * 60)
+
+
+def _print_wait_result(result: Dict[str, Any]) -> None:
+    """Print formatted wait result."""
+    print("\n" + "=" * 60)
+    print("🏁 TEAM EXECUTION COMPLETE")
+    print("=" * 60)
+
+    if not result.get("success"):
+        print(f"❌ Error: {result.get('error', 'Unknown error')}")
+        print("\n" + "=" * 60)
+        return
+
+    # Get the actual results from the coordinator
+    results = result.get("results", {})
+    progress = result.get("progress", {})
+
+    # Show progress summary
+    if progress:
+        completed = progress.get("completed", 0)
+        failed = progress.get("failed", 0)
+        total = progress.get("total", 0)
+        status_icon = "✅" if failed == 0 else "❌" if completed == 0 else "⚠️"
+        print(f"Status: {status_icon} {completed}/{total} completed, {failed} failed")
+
+    # Show agent outputs
+    agent_outputs = results.get("agent_outputs", [])
+    if agent_outputs:
+        print("\n📊 Agent Results:")
+        for output in agent_outputs:
+            agent_id = output.get("agent_id", "unknown")
+            agent_result = output.get("result", {})
+
+            # The result structure from langchain adapter
+            if isinstance(agent_result, dict):
+                task_status = agent_result.get("status", "unknown")
+                icon = "✅" if task_status == "completed" else "❌"
+                print(f"\n   {icon} Agent: {agent_id}")
+
+                if task_status == "completed":
+                    # Get the actual tool result
+                    tool_data = agent_result.get("result", {})
+                    if isinstance(tool_data, dict):
+                        tool_result = tool_data.get("result", {})
+                        if isinstance(tool_result, dict):
+                            if "results" in tool_result and tool_result["results"]:
+                                print(
+                                    f"   Found {len(tool_result['results'])} search results:"
+                                )
+                                for i, item in enumerate(tool_result["results"][:5], 1):
+                                    title = item.get("title", "No title")
+                                    url = item.get("url", "No URL")
+                                    snippet = item.get("snippet", "")[:100]
+                                    print(f"\n      {i}. {title}")
+                                    print(f"         🔗 {url}")
+                                    print(f"         📝 {snippet}...")
+                            elif "message" in tool_result:
+                                print(f"   ℹ️ {tool_result['message']}")
+                            elif "content" in tool_result:
+                                content = tool_result["content"]
+                                preview = (
+                                    content[:300] + "..."
+                                    if len(content) > 300
+                                    else content
+                                )
+                                print(f"   📝 {preview}")
+                            else:
+                                # Print any other result data
+                                for key, value in tool_result.items():
+                                    if isinstance(value, str):
+                                        print(f"   {key}: {value[:100]}")
+                elif "error" in agent_result:
+                    print(f"   ❌ Error: {agent_result['error']}")
+            else:
+                print(f"\n   Agent: {agent_id}")
+                print(f"   Result: {agent_result}")
+    else:
+        print("\n   No agent outputs available")
+
+    # Show artifacts
+    artifacts = results.get("artifacts", [])
+    if artifacts:
+        print(f"\n📁 Artifacts: {len(artifacts)} files")
+        for artifact in artifacts[:5]:
+            print(f"   - {artifact.get('name', 'unknown')}")
+
+    # Show work directory location
+    team_id = result.get("team_id", "unknown")
+    print(f"\n📂 Output directory: workflows/{team_id}/")
+    print(f"   - Agent outputs: workflows/{team_id}/<agent_id>/output.json")
+
+    print("\n" + "=" * 60)
+
+
 def add_team_parser(subparsers: Any) -> None:
     """Register team subcommands on the main CLI subparsers."""
     team_parser = subparsers.add_parser(
@@ -63,6 +191,11 @@ def add_team_parser(subparsers: Any) -> None:
         "--wait",
         action="store_true",
         help="Wait for team to complete before returning",
+    )
+    create_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output raw JSON instead of formatted summary",
     )
 
     # spawn command - Spawn agents from existing plan
@@ -222,14 +355,23 @@ def _cmd_create(args: Any) -> int:
             max_parallel=args.max_parallel,
         )
 
-        print(json.dumps(result, indent=2, default=str))
+        # Print result (formatted or JSON)
+        if args.json:
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            _print_team_result(result, args.request)
 
         if args.wait and result.get("team_id"):
-            print(f"\nWaiting for team '{result['team_id']}' to complete...")
+            print(f"\n⏳ Waiting for team '{result['team_id']}' to complete...")
             from tools.agent_spawner import wait_for_team
 
-            wait_result = wait_for_team(result["team_id"])
-            print(json.dumps(wait_result, indent=2, default=str))
+            wait_result = wait_for_team(result["team_id"], verbose=True)
+            # Add team_id to wait_result for reference
+            wait_result["team_id"] = result["team_id"]
+            if args.json:
+                print(json.dumps(wait_result, indent=2, default=str))
+            else:
+                _print_wait_result(wait_result)
 
         return 0 if result.get("success", True) else 1
 

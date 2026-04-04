@@ -45,6 +45,7 @@ class LangChainSubagentAdapter(AgentAdapter):
         role: str,
         task: Dict[str, Any],
         work_dir: Path,
+        on_complete: Optional[Callable[[str, str, Dict[str, Any]], None]] = None,
         **kwargs: Any,
     ) -> AgentInstance:
         """Spawn an in-process LangChain subagent.
@@ -81,7 +82,7 @@ class LangChainSubagentAdapter(AgentAdapter):
         # Start task in thread
         thread = threading.Thread(
             target=self._execute_task,
-            args=(agent_id, role, task, work_dir),
+            args=(agent_id, role, task, work_dir, on_complete),
             daemon=True,
         )
         self._running_tasks[agent_id] = thread
@@ -103,8 +104,12 @@ class LangChainSubagentAdapter(AgentAdapter):
         role: str,
         task: Dict[str, Any],
         work_dir: Path,
+        on_complete: Optional[Callable[[str, str, Dict[str, Any]], None]] = None,
     ) -> None:
         """Execute the task in a background thread."""
+        task_id = task.get("task_id", "unknown")
+        result_data: Dict[str, Any] = {}
+
         try:
             action = task.get("action", "")
 
@@ -117,12 +122,13 @@ class LangChainSubagentAdapter(AgentAdapter):
                 # Basic execution using tool registry
                 result = self._execute_with_tools(task)
 
-            # Save result
-            self._results[agent_id] = {
+            # Prepare result
+            result_data = {
                 "status": "completed",
                 "result": result,
                 "completed_at": datetime.now().isoformat(),
             }
+            self._results[agent_id] = result_data
 
             # Write status file
             status_file = work_dir / "status.json"
@@ -145,11 +151,13 @@ class LangChainSubagentAdapter(AgentAdapter):
             error_msg = str(e)
             traceback_str = traceback.format_exc()
 
-            self._results[agent_id] = {
+            result_data = {
                 "status": "failed",
                 "error": error_msg,
                 "traceback": traceback_str,
+                "completed_at": datetime.now().isoformat(),
             }
+            self._results[agent_id] = result_data
 
             status_file = work_dir / "status.json"
             with open(status_file, "w", encoding="utf-8") as f:
@@ -169,6 +177,14 @@ class LangChainSubagentAdapter(AgentAdapter):
                 f.write(traceback_str)
 
         finally:
+            # Notify coordinator of completion
+            if on_complete:
+                try:
+                    on_complete(agent_id, task_id, result_data)
+                except Exception:
+                    # Don't let callback errors break the thread
+                    pass
+
             if agent_id in self._running_tasks:
                 del self._running_tasks[agent_id]
 
@@ -221,16 +237,38 @@ class LangChainSubagentAdapter(AgentAdapter):
             if inp.startswith("path:")
         ]
 
+        # Try to extract path and content from action
+        import re
+
+        path_match = re.search(r"to\s+(/[^\s]+)", action)
+
         tool_name = self._map_task_to_tool(task)
 
         if tool_name == "read_file" and file_paths:
             return {"path": file_paths[0]}
+        if tool_name == "write_file":
+            if path_match:
+                target_path = path_match.group(1)
+                # Extract content: "Write X to path" -> X
+                content_match = re.match(r"^Write\s+(.+?)\s+to", action, re.IGNORECASE)
+                if content_match:
+                    content = content_match.group(1)
+                else:
+                    content = action
+                return {"path": target_path, "content": content}
+            return {"path": "/tmp/output.txt", "content": action}
         if tool_name == "bash_execute":
             return {"command": action}
-        if tool_name in ("call_llm", "search"):
-            return {"prompt": action, "query": action}
+        if tool_name == "call_llm":
+            return {"prompt": action}
+        if tool_name == "search":
+            return {"query": action}
 
-        return {"command": action}
+        return {"prompt": action}
+        if tool_name == "search":
+            return {"query": action}
+
+        return {"prompt": action}
 
     def check_status(self, agent: AgentInstance) -> AgentStatus:
         """Check the status of a subagent."""
