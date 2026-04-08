@@ -487,9 +487,9 @@ class ProjectToolRegistry:
                 "search_query": search_query,
             }
 
-        await api.pool.add_account(
-            username, password, email, api_key, cookies=cookies_str
-        )
+        # await api.pool.add_account(
+        #     username, password, email, api_key, cookies=cookies_str
+        # )
 
         posts: list[str] = []
         try:
@@ -538,9 +538,9 @@ class ProjectToolRegistry:
                 "limit": limit,
             }
 
-        await api.pool.add_account(
-            username, password, email, api_key, cookies=cookies_str
-        )
+        # await api.pool.add_account(
+        #     username, password, email, api_key, cookies=cookies_str
+        # )
 
         endpoint_error: Optional[str] = None
         try:
