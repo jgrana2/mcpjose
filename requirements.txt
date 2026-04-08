@@ -18,3 +18,4 @@ schedule
 chromadb
 langchain-chroma
 rich
+deepagents
