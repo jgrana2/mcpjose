@@ -1,18 +1,36 @@
 # Deep Agents Implementation Guide
 
-This guide documents the complete Deep Agents SDK integration for MCP Jose, providing a powerful, production-ready agent framework with streaming, persistence, memory, skills, and human-in-the-loop capabilities.
+This guide reflects the current `langchain_deep_agent` implementation in MCP Jose. The package is now documented as a **parity-focused wrapper** around the existing LangChain agent surface, with Deep Agents used internally when available.
 
 ## Overview
 
-The Deep Agents implementation provides:
+Current behavior emphasizes compatibility over expanded feature claims:
 
-- **Real-time Streaming**: Watch agent execution in real-time with tool calls, results, and thinking steps
-- **Persistent Memory**: Maintain conversation history across sessions with automatic checkpointing
-- **Skills Integration**: Load domain-specific knowledge and workflows
-- **Human-in-the-Loop**: Require manual approval for sensitive operations
-- **Interactive Sessions**: Chat-style interface with persistent thread management
-- **Task Planning**: Decompose complex requests into manageable steps
-- **Structured Output**: Type-safe responses with Pydantic validation
+- **LangChain parity**: the deep agent preserves the same user-facing workflow as `langchain_agent`
+- **Deep Agents backend when available**: the runtime can use Deep Agents internally if the dependency is installed
+- **Fallback behavior**: if Deep Agents is unavailable, the package falls back to the existing agent implementation
+- **Shared tools and skills**: the wrapper still exposes the same project tools, prompts, and skill discovery path
+- **CLI alignment**: the deep agent CLI mirrors the classic agent CLI behavior at the surface
+
+## What is and isn’t supported today
+
+### Supported
+
+- Same high-level agent entry points as the classic agent
+- Interactive and voice behavior aligned with `langchain_agent`
+- Tool and skill reuse from the existing agent stack
+- Deep Agents runtime path when the package is installed
+
+### Not currently documented as active guarantees
+
+The following items appeared in older docs, but should be treated as historical or aspirational unless reintroduced in code:
+
+- streaming execution APIs
+- persistent memory/thread management claims
+- planning-specific CLI flags such as `--plan`
+- human-in-the-loop workflows as a guaranteed feature set
+- extra runtime flags like `--stream`, `--memory`, `--hitl`, or `--show-history`
+- structured output guarantees tied to Deep Agents specifically
 
 ## Quick Start
 
@@ -21,29 +39,9 @@ The Deep Agents implementation provides:
 ```python
 from langchain_deep_agent import MCPJoseLangChainDeepAgent
 
-# Create agent (automatically initializes Deep Agents SDK)
-agent = MCPJoseLangChainDeepAgent(
-    model="openai:gpt-5.4",
-    enable_streaming=True,
-    enable_memory=True,
-)
-
-# Single turn
-result = agent.invoke("Explain quantum computing", thread_id="conv_001")
-print(result["output"])
-
-# Or use the CLI
-# python -m langchain_deep_agent "Explain quantum computing" --stream --memory
-```
-
-### Interactive Session
-
-```python
-from langchain_deep_agent import InteractiveStreamingSession
-
-agent = MCPJoseLangChainDeepAgent(enable_streaming=True)
-session = InteractiveStreamingSession(agent)
-session.interactive_loop()  # Chat-style REPL
+agent = MCPJoseLangChainDeepAgent()
+result = agent.invoke("Explain quantum computing")
+print(result)
 ```
 
 ### Command Line
@@ -52,212 +50,49 @@ session.interactive_loop()  # Chat-style REPL
 # Simple query
 python -m langchain_deep_agent "What is LangGraph?"
 
-# With streaming and persistent memory
-python -m langchain_deep_agent "Complex research task" --stream --memory
-
 # Interactive mode
 python -m langchain_deep_agent --interactive
 
-# Generate a task plan
-python -m langchain_deep_agent "Build a web app" --plan --plan-depth 3
-
-# List available tools
-python -m langchain_deep_agent --list-tools
-
-# List discovered skills
-python -m langchain_deep_agent --list-skills
-
-# Show conversation history
-python -m langchain_deep_agent --show-history --thread-id my_conversation
+# Voice mode, if supported by the shared agent flow
+python -m langchain_deep_agent --voice
 ```
 
-## Core Capabilities
+## Implementation Notes
 
-### 1. Streaming Execution
+### Agent runtime
 
-Real-time observation of agent operation:
+- `langchain_deep_agent/agent.py` subclasses `MCPJoseLangChainAgent`
+- It attempts to build a Deep Agents runtime with `create_deep_agent(tools=self.tools, system_prompt=self.system_prompt)`
+- If the dependency is missing, the existing agent implementation is used instead
 
-```python
-from langchain_deep_agent import StreamingRunner
+### CLI behavior
 
-agent = MCPJoseLangChainDeepAgent(enable_streaming=True)
-runner = StreamingRunner(agent)
+- `langchain_deep_agent/main.py` now mirrors the classic `langchain_agent/main.py` flow
+- Tests cover CLI parity, voice dispatch, prompt rendering, and interactive rejection behavior
 
-# Run with streaming output
-result = runner.run(
-    user_input="Research topic for me",
-    show_intermediate=True,  # Show thinking steps
-    show_tool_calls=True,    # Show tool calls and results
-)
-```
+### Dependency note
 
-Output events include:
-- Tool calls with arguments
-- Tool execution results
-- Agent thinking/reasoning
-- Intermediate steps
-- Final response
+`deepagents` is not currently listed in `requirements.txt`, so the Deep Agents backend path still requires separate installation.
 
-### 2. Persistent Memory
+## Relevant Files
 
-Maintain conversation state across sessions:
+- `langchain_deep_agent/agent.py`
+- `langchain_deep_agent/main.py`
+- `langchain_deep_agent/deepagents_config.py`
+- `tests/test_langchain_deep_agent.py`
+- `DEEP_AGENTS_COMPLETE.md`
+- `langchain_deep_agent/IMPLEMENTATION_SUMMARY.md`
+- `langchain_deep_agent/QUICKSTART.md`
 
-```python
-from langchain_deep_agent import MCPJoseLangChainDeepAgent
+## Keeping Docs Consistent
 
-# Same thread_id maintains context
-agent = MCPJoseLangChainDeepAgent(
-    enable_memory=True,
-    thread_id="my_project_001"
-)
+When updating this area, make sure the docs all tell the same story:
 
-# First turn
-result1 = agent.invoke("Remember: Project uses FastAPI")
+1. `DEEP_AGENTS_COMPLETE.md` for repo-wide implementation status
+2. `langchain_deep_agent/DEEP_AGENTS_GUIDE.md` for package-level usage notes
+3. `IMPLEMENTATION_SUMMARY.md` and `QUICKSTART.md` for user-facing details
 
-# Later session - same thread
-result2 = agent.invoke("What tech stack did we discuss?")
-# Agent remembers!
-
-# Retrieve history
-history = agent.get_thread_history(thread_id="my_project_001")
-```
-
-### 3. Task Planning
-
-Decompose complex requests into actionable steps:
-
-```python
-plan = agent.plan(
-    "Build a full-stack e-commerce platform",
-    depth=3  # 1=simple, 2=moderate, 3=detailed
-)
-
-print(plan["plan"])
-# Returns: main objective, atomic tasks, dependencies,
-#          complexity, required tools, risks, success criteria
-```
-
-Plan structure:
-- Main objective
-- Atomic tasks (numbered, independent when possible)
-- Task dependencies
-- Complexity estimates
-- Required tools/skills
-- Potential risks
-- Success criteria
-
-### 4. Skills Integration
-
-Leverage domain-specific knowledge:
-
-```python
-from langchain_deep_agent import SkillsManager
-
-agent = MCPJoseLangChainDeepAgent()
-skills_mgr = SkillsManager(repo_root=Path("."))
-
-# Discover skills
-skills = skills_mgr.discover_skills()
-# Returns: [
-#   {"skill_id": "web-artifacts-builder", "description": "..."},
-#   {"skill_id": "figma-implement-design", "description": "..."},
-#   ...
-# ]
-
-# Skills are automatically injected into agent context
-```
-
-Skills provide:
-- Specialized workflows
-- Domain-specific instructions
-- Reference materials and templates
-- Best practices and patterns
-
-### 5. Human-in-the-Loop
-
-Require manual approval for sensitive operations:
-
-```python
-from langchain_deep_agent import HumanInTheLoopConfig
-
-hitl = HumanInTheLoopConfig()
-
-# Standard dangerous tools
-hitl.configure_dangerous_tools()
-# Configures approval for:
-# - delete_file
-# - send_email
-# - process_payment
-# - execute_command
-# - etc.
-
-# Or customize
-hitl.require_approval("my_tool", allowed_decisions=["approve", "reject"])
-
-agent = MCPJoseLangChainDeepAgent(interrupt_on_tools=hitl.get_interrupt_config())
-```
-
-Workflow:
-1. Agent selects tool that requires approval
-2. User sees operation details
-3. User decides: approve / reject / edit / skip
-4. If edit, agent modifies parameters before execution
-
-Tracking approvals:
-
-```python
-from langchain_deep_agent import OperationApprovalTracker
-
-tracker = OperationApprovalTracker()
-tracker.record_decision("delete_file", decision="approve")
-
-# Get statistics
-stats = tracker.get_approval_stats()
-# Returns: {
-#   "total_decisions": 42,
-#   "approved": 35,
-#   "rejected": 5,
-#   "edited": 2,
-#   "approval_rate": 0.83,
-#   "by_tool": {...}
-# }
-```
-
-### 6. Memory Management
-
-```python
-from langchain_deep_agent import MemoryManager
-
-mem_mgr = MemoryManager(backend_type="memory")
-
-# Load context files
-agents_md = mem_mgr.load_agents_md(Path("AGENTS.md"))
-memory_md = mem_mgr.load_memory_md(Path("MEMORY.md"))
-
-# Prepare for Deep Agents
-files = mem_mgr.prepare_memory_files(
-    agents_md_content=agents_md,
-    memory_md_content=memory_md,
-)
-```
-
-### 7. Middleware Configuration
-
-```python
-from langchain_deep_agent import MiddlewareConfig
-
-middleware = MiddlewareConfig()
-
-# Add logging
-middleware.add_logging_middleware(verbose=True)
-
-# Add automatic retries with backoff
-middleware.add_retry_middleware(max_retries=3, backoff_factor=2.0)
-
-# Add rate limiting
-middleware.add_rate_limiter_middleware(requests_per_minute=60)
-
-config = middleware.get_middleware_config()
+If new Deep Agents features are added later, document them only after verifying the code and tests actually support them.
 ```
 
 ## Architecture
