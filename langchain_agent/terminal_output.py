@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
-from typing import TextIO
+from typing import Optional, TextIO
 
 try:
     from rich.console import Console
@@ -38,7 +39,9 @@ def print_markdown(text: str, *, output_stream: TextIO = sys.stdout) -> None:
     console.print(Markdown(rendered_text))
 
 
-def print_separator(*, output_stream: TextIO = sys.stdout, width: int = 80, char: str = "-") -> None:
+def print_separator(*, output_stream: TextIO = sys.stdout, width: Optional[int] = None, char: str = "=") -> None:
     """Print a full-width separator line in terminal output."""
+    if width is None:
+        width = shutil.get_terminal_size().columns
     line = char * max(width, 1)
     print(line, file=output_stream)
