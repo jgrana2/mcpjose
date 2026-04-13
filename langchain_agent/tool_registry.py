@@ -30,6 +30,7 @@ from tools.filesystem import FilesystemTools
 from tools.navigation import extract_html_content, extract_pdf_content
 from tools.whatsapp import WhatsAppCloudAPIClient, WhatsAppSendResult
 from tools.wolfram_alpha import WolframAlphaClient
+from tools.ai_safety import assess_prompt_risk, rewrite_to_safe_alternative
 
 from .context import ProjectContextLoader, SkillDocument
 
@@ -154,6 +155,14 @@ class ProjectToolRegistry:
     def mp_cancel_subscription(self, subscription_id: str) -> Dict[str, Any]:
         """Cancel a MercadoPago subscription by preapproval id."""
         return self._get_payment_gateway().cancel_subscription(subscription_id)
+
+    def assess_prompt_risk(self, prompt: str) -> Dict[str, Any]:
+        """Assess a prompt for manipulative or unsafe patterns."""
+        return assess_prompt_risk(prompt)
+
+    def rewrite_to_safe_alternative(self, request: str) -> Dict[str, str]:
+        """Rewrite a risky request into a safer alternative."""
+        return rewrite_to_safe_alternative(request)
 
     # Context / Skills tools
     def read_agents_md(self, max_chars: int = 16000) -> Dict[str, Any]:
