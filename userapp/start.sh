@@ -5,7 +5,7 @@
 
 # Esto:
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
-PLAN_DIR="$SCRIPT_DIR/Plan"
+PLAN_DIR="$SCRIPT_DIR/Plan3"
 ATOMIC_TASKS_FILE="$PLAN_DIR/AtomicTasks.json"
 
 mode="${1:-}"
@@ -48,7 +48,7 @@ EOF
 )
 
   echo "Generating execution plan..."
-  opencode run "$plan_prompt" || exit $?
+  opencode --prompt "$plan_prompt" || exit $?
 
   if [[ ! -f "$ATOMIC_TASKS_FILE" ]]; then
     echo "Plan generation did not produce $ATOMIC_TASKS_FILE."
