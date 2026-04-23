@@ -46,6 +46,26 @@ def test_run_interactive_loop_preserves_history() -> None:
     assert "Assistant> echo:second question" in rendered
 
 
+def test_run_interactive_loop_new_session_clears_history() -> None:
+    prompts = iter(["first question", "/new", "second question", "quit"])
+    output = StringIO()
+    agent = FakeAgent()
+
+    exit_code = interactive_runner.run_interactive_loop(
+        agent=agent,
+        input_func=lambda _: next(prompts),
+        output_stream=output,
+    )
+
+    assert exit_code == 0
+    assert [call[0] for call in agent.calls] == ["first question", "second question"]
+    assert agent.calls[0][1] == []
+    assert agent.calls[1][1] == []
+    rendered = output.getvalue()
+    assert "Use '/new' to start a fresh session" in rendered
+    assert "Started a new session." in rendered
+
+
 def test_run_interactive_loop_renders_assistant_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

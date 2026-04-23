@@ -23,6 +23,7 @@ from . import terminal_output
 
 
 TERMINAL_EXIT_COMMANDS = {"exit", "quit", ":q"}
+TERMINAL_NEW_SESSION_COMMANDS = {"/new"}
 
 
 def _append_turn(history: list[Any], prompt: str, response: str) -> list[Any]:
@@ -30,6 +31,10 @@ def _append_turn(history: list[Any], prompt: str, response: str) -> list[Any]:
         return history
 
     return history + [HumanMessage(content=prompt), AIMessage(content=response)]
+
+
+def _is_new_session_command(user_input: str) -> bool:
+    return user_input.lower() in TERMINAL_NEW_SESSION_COMMANDS
 
 
 def _list_mac_voice_devices() -> list[tuple[int, str]]:
@@ -273,7 +278,7 @@ def run_interactive_loop(
 
     print(
         "Interactive terminal mode. Type your prompt and press Enter. "
-        "Use 'exit', 'quit', or Ctrl-D to stop.",
+        "Use '/new' to start a fresh session. Use 'exit', 'quit', or Ctrl-D to stop.",
         file=output_stream,
     )
     if voice_mode:
@@ -303,6 +308,10 @@ def run_interactive_loop(
         if user_input.lower() in TERMINAL_EXIT_COMMANDS:
             print("Exiting interactive mode.", file=output_stream)
             return 0
+        if _is_new_session_command(user_input):
+            history = []
+            print("Started a new session.", file=output_stream)
+            continue
 
         if voice_mode and not user_input:
             audio_path: Optional[Path] = None
