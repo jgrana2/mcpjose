@@ -1,7 +1,8 @@
 """Core configuration and credential management with singleton pattern."""
 
-import json
+import atexit
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -11,16 +12,11 @@ from typing import Any, Dict, Optional
 class Config:
     """Immutable configuration container for all API credentials and settings."""
 
-    # OpenAI
     openai_api_key: Optional[str] = None
-
-    # Google
     google_api_key: Optional[str] = None
     google_cse_id: Optional[str] = None
     google_credentials_path: Optional[Path] = None
     google_project_id: Optional[str] = None
-
-    # MercadoPago
     mp_access_token: Optional[str] = None
     mp_public_key: Optional[str] = None
     mp_webhook_secret: Optional[str] = None
@@ -28,31 +24,18 @@ class Config:
     mp_currency: str = "COP"
     mp_plan_reason: str = "Premium Tools Subscription"
     mp_back_url: str = "https://mcpjose.com"
-
-    # Search
     search_backend: str = "ddgs"
-
-    # Paths
     repo_root: Optional[Path] = None
 
     def __post_init__(self):
-        # frozen=True requires object.__setattr__ for post-init modifications
         if self.repo_root is None:
-            object.__setattr__(
-                self, "repo_root", Path(__file__).resolve().parent.parent
-            )
+            object.__setattr__(self, "repo_root", Path(__file__).resolve().parent.parent)
 
 
 class CredentialManager:
-    """Singleton manager for loading and caching credentials from multiple sources.
-
-    Implements the Singleton pattern to ensure credentials are loaded once
-    and shared across the application. Follows dependency inversion by
-    separating credential loading from tool implementation.
-    """
-
     _instance: Optional["CredentialManager"] = None
     _config: Optional[Config] = None
+    _google_temp_path: Optional[Path] = None
 
     def __new__(cls) -> "CredentialManager":
         if cls._instance is None:
@@ -60,13 +43,23 @@ class CredentialManager:
         return cls._instance
 
     def get_config(self) -> Config:
-        """Get or initialize the configuration singleton."""
         if self._config is None:
             self._config = self._load_config()
         return self._config
 
+    @classmethod
+    def _cleanup_google_temp_file(cls) -> None:
+        if cls._google_temp_path is None:
+            return
+
+        try:
+            cls._google_temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        finally:
+            cls._google_temp_path = None
+
     def _load_config(self) -> Config:
-        """Load configuration strictly from environment variables natively."""
         from dotenv import load_dotenv
 
         repo_root = Path(__file__).resolve().parent.parent
@@ -75,21 +68,26 @@ class CredentialManager:
         if env_path.exists():
             load_dotenv(env_path)
 
-        # Handle the bundled JSON credential string as a temp environment file for Vision natively
         google_creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+        google_application_credentials = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
         google_project_id = os.environ.get("GOOGLE_PROJECT_ID")
         google_creds_path = None
 
-        if google_creds_json:
-            import tempfile
+        if google_application_credentials:
+            configured_path = Path(google_application_credentials).expanduser()
+            if configured_path.is_file():
+                google_creds_path = configured_path
 
-            # Write a temporary credential file for SDK usage securely
-            fd, temp_path = tempfile.mkstemp(suffix=".json")
-            with os.fdopen(fd, 'w') as f:
-                f.write(google_creds_json)
-
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_path
-            google_creds_path = Path(temp_path)
+        if google_creds_json and google_creds_path is None:
+            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8")
+            tmp.write(google_creds_json)
+            tmp.flush()
+            tmp.close()
+            os.chmod(tmp.name, 0o600)
+            type(self)._google_temp_path = Path(tmp.name)
+            atexit.register(self._cleanup_google_temp_file)
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tmp.name
+            google_creds_path = Path(tmp.name)
 
         return Config(
             openai_api_key=os.environ.get("OPENAI_API_KEY"),
@@ -109,48 +107,27 @@ class CredentialManager:
         )
 
     def ensure_openai_key(self) -> str:
-        """Validate and return OpenAI API key.
-
-        Raises:
-            EnvironmentError: If OPENAI_API_KEY is not configured.
-        """
         key = self.get_config().openai_api_key
         if not key:
             raise EnvironmentError("OPENAI_API_KEY is not set")
         return key
 
     def ensure_google_credentials(self) -> Dict[str, Any]:
-        """Validate and return Google credentials."""
         config = self.get_config()
-        # Fallback to check if GOOGLE_CREDENTIALS_JSON is in environment
         if not config.google_credentials_path and not os.environ.get("GOOGLE_CREDENTIALS_JSON"):
             raise FileNotFoundError("Google credentials JSON is missing from environment.")
-
         if not config.google_project_id:
             raise RuntimeError("Google credentials missing GOOGLE_PROJECT_ID")
-
-        return {
-            "project_id": config.google_project_id,
-            "credentials_path": config.google_credentials_path,
-        }
+        return {"project_id": config.google_project_id, "credentials_path": config.google_credentials_path}
 
     def get_api_key(self, service: str) -> Optional[str]:
-        """Generic API key lookup by service name.
-
-        Supports: 'openai', 'google', 'mercadopago'
-        """
-        mapping = {
-            "openai": "openai_api_key",
-            "google": "google_api_key",
-            "mercadopago": "mp_access_token",
-        }
+        mapping = {"openai": "openai_api_key", "google": "google_api_key", "mercadopago": "mp_access_token"}
         attr = mapping.get(service.lower())
         if attr:
             return getattr(self.get_config(), attr, None)
         return os.environ.get(service.upper())
 
     def get_mercadopago_config(self) -> Dict[str, Any]:
-        """Return all MercadoPago configuration values."""
         cfg = self.get_config()
         return {
             "access_token": cfg.mp_access_token,
@@ -163,7 +140,5 @@ class CredentialManager:
         }
 
 
-# Global accessor for convenience
 def get_config() -> Config:
-    """Get the global configuration singleton."""
     return CredentialManager().get_config()

@@ -23,10 +23,6 @@ class PaymentWebhookTool:
         self.creds = CredentialManager()
         self._ensure_tables()
 
-    # ------------------------------------------------------------------
-    # DB / table setup
-    # ------------------------------------------------------------------
-
     def _get_connection(self):
         return sqlite3.connect(self.db_path)
 
@@ -52,31 +48,18 @@ class PaymentWebhookTool:
             """)
             conn.commit()
 
-    # ------------------------------------------------------------------
-    # Signature validation
-    # ------------------------------------------------------------------
-
     def validate_signature(self, data_id: str, request_id: str, timestamp: str, v1_hash: str) -> bool:
-        """Validate x-signature HMAC-SHA256 from MercadoPago webhook headers.
-
-        Header format: x-signature: ts=<timestamp>,v1=<hash>
-        Manifest:      id:<data_id>;request-id:<request_id>;ts:<timestamp>;
-        """
+        """Validate x-signature HMAC-SHA256 from MercadoPago webhook headers."""
         secret = self.creds.get_mercadopago_config().get("webhook_secret", "")
         if not secret:
-            logger.warning("MP_WEBHOOK_SECRET not set — skipping signature check")
-            return True
+            logger.warning("MP_WEBHOOK_SECRET not set — rejecting webhook signature validation")
+            return False
 
         manifest = f"id:{data_id};request-id:{request_id};ts:{timestamp};"
         expected = hmac.new(secret.encode(), manifest.encode(), hashlib.sha256).hexdigest()
         return hmac.compare_digest(expected, v1_hash)
 
-    # ------------------------------------------------------------------
-    # MP API lookup
-    # ------------------------------------------------------------------
-
     def _fetch_preapproval(self, preapproval_id: str) -> Optional[Dict]:
-        """Fetch preapproval details from MP API to get external_reference (phone)."""
         mp_cfg = self.creds.get_mercadopago_config()
         token = mp_cfg.get("access_token")
         if not token:
@@ -94,13 +77,10 @@ class PaymentWebhookTool:
             return None
 
     def _resolve_phone(self, preapproval_id: str, preapproval_data: Optional[Dict]) -> Optional[str]:
-        """Resolve a phone number from preapproval data or the pending_subscriptions table."""
         if preapproval_data:
             phone = preapproval_data.get("external_reference")
             if phone:
                 return phone
-
-        # Fallback: check the pending_subscriptions table written at checkout-link creation time
         try:
             with self._get_connection() as conn:
                 row = conn.execute(
@@ -110,19 +90,23 @@ class PaymentWebhookTool:
             if row:
                 return row[0]
         except sqlite3.OperationalError:
-            pass  # Table may not exist in all environments
+            pass
         return None
 
-    # ------------------------------------------------------------------
-    # Core processing
-    # ------------------------------------------------------------------
+    def _resolve_plan_id(self, payload: Dict[str, Any], preapproval_data: Optional[Dict], allow_payload_fallbacks: bool) -> str:
+        if preapproval_data:
+            plan_id = preapproval_data.get("preapproval_plan_id")
+            if plan_id:
+                return str(plan_id)
+        if allow_payload_fallbacks:
+            return str(payload.get("plan_id", "default_plan"))
+        return "default_plan"
 
-    def process_webhook(self, payload: Dict[str, Any]) -> Dict[str, str]:
-        """Process a MercadoPago webhook event.
-
-        Handles both real MP events (type='subscription_preapproval') and
-        simulated payloads (action='created'/'updated') for testing.
-        """
+    def process_webhook(
+        self,
+        payload: Dict[str, Any],
+        allow_payload_fallbacks: bool = False,
+    ) -> Dict[str, str]:
         event_type = payload.get("type") or payload.get("action")
         if not event_type:
             return {"status": "error", "message": "Missing type/action in payload"}
@@ -135,23 +119,30 @@ class PaymentWebhookTool:
         if event_type not in ("subscription_preapproval", "created", "updated"):
             return {"status": "ignored", "message": f"Event type '{event_type}' not handled"}
 
-        # Fetch full details from MP API to get external_reference (phone) and authoritative status
         preapproval_data = self._fetch_preapproval(preapproval_id)
-
-        # Determine status: use MP API response when available, fallback to payload
         if preapproval_data:
             new_status = preapproval_data.get("status", "authorized")
         else:
+            if not allow_payload_fallbacks:
+                return {
+                    "status": "error",
+                    "message": f"Unable to verify preapproval '{preapproval_id}' with MercadoPago",
+                }
             new_status = payload.get("status", "authorized")
 
-        # Resolve phone number
         phone_number = self._resolve_phone(preapproval_id, preapproval_data)
-        if not phone_number:
-            # Last resort: accept phone from simulated payloads (demo/testing)
+        if not phone_number and allow_payload_fallbacks:
             phone_number = payload.get("phone_number") or payload.get("user_id", "unknown")
+        if not phone_number:
+            return {
+                "status": "error",
+                "message": f"Unable to resolve phone number for preapproval '{preapproval_id}'",
+            }
 
-        user_id = payload.get("user_id") or f"mp_{preapproval_id[:12]}"
-        plan_id = payload.get("plan_id", "default_plan")
+        user_id = (
+            payload.get("user_id") if allow_payload_fallbacks else None
+        ) or f"mp_{preapproval_id[:12]}"
+        plan_id = self._resolve_plan_id(payload, preapproval_data, allow_payload_fallbacks)
 
         try:
             with self._get_connection() as conn:
@@ -181,14 +172,9 @@ class PaymentWebhookTool:
 
                 conn.commit()
                 return {"status": "success", "message": msg}
-
         except sqlite3.Error as e:
             logger.error(f"DB error processing webhook: {e}")
             return {"status": "error", "message": str(e)}
-
-    # ------------------------------------------------------------------
-    # MCP tool registration
-    # ------------------------------------------------------------------
 
     def create_mcp_tools(self) -> list[types.Tool]:
         return [
@@ -197,12 +183,7 @@ class PaymentWebhookTool:
                 description="Simulate a MercadoPago webhook to manually update subscription state (for testing).",
                 inputSchema={
                     "type": "object",
-                    "properties": {
-                        "payload": {
-                            "type": "string",
-                            "description": "JSON string of the webhook payload",
-                        }
-                    },
+                    "properties": {"payload": {"type": "string", "description": "JSON string of the webhook payload"}},
                     "required": ["payload"],
                 },
             )
@@ -212,7 +193,7 @@ class PaymentWebhookTool:
         if name == "mp_simulate_webhook":
             try:
                 payload = json.loads(arguments.get("payload", "{}"))
-                result = self.process_webhook(payload)
+                result = self.process_webhook(payload, allow_payload_fallbacks=True)
                 return [types.TextContent(type="text", text=json.dumps(result))]
             except json.JSONDecodeError:
                 return [types.TextContent(type="text", text=json.dumps({"error": "Invalid JSON payload"}))]
@@ -220,5 +201,3 @@ class PaymentWebhookTool:
                 return [types.TextContent(type="text", text=json.dumps({"error": str(e)}))]
 
         raise ValueError(f"Unknown tool: {name}")
-
-

@@ -1,9 +1,11 @@
 """Bash command execution tool."""
 
+import shlex
 import subprocess
 from typing import Any, Dict, Optional
 
 _MAX_OUTPUT_BYTES = 50_000  # 50 KB per stream
+_ALLOWED_SHELL_BINARIES = {"bash", "sh", "zsh"}
 
 
 class BashExecutor:
@@ -13,6 +15,22 @@ class BashExecutor:
         from tools.filesystem import FilesystemTools
 
         self._fs = FilesystemTools(allowed_dirs)
+
+    def _build_command_args(self, command: str) -> list[str]:
+        stripped_command = command.strip()
+        if not stripped_command:
+            raise ValueError("Command cannot be empty")
+
+        cmd_parts = shlex.split(stripped_command)
+        if len(cmd_parts) >= 2 and cmd_parts[0] in _ALLOWED_SHELL_BINARIES and cmd_parts[1] == "-lc":
+            if len(cmd_parts) != 3:
+                raise ValueError("Shell commands must use the form '<shell> -lc <command>'")
+            return [cmd_parts[0], "-lc", cmd_parts[2]]
+
+        if cmd_parts and cmd_parts[0] in _ALLOWED_SHELL_BINARIES:
+            return [cmd_parts[0], "-lc", stripped_command]
+
+        return ["bash", "-lc", stripped_command]
 
     def execute(
         self,
@@ -29,9 +47,10 @@ class BashExecutor:
             resolved_cwd = str(self._fs.allowed_dirs[0])
 
         try:
+            cmd_parts = self._build_command_args(command)
             result = subprocess.run(
-                command,
-                shell=True,
+                cmd_parts,
+                shell=False,
                 capture_output=True,
                 text=True,
                 timeout=timeout,

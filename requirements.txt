@@ -20,3 +20,4 @@ langchain-chroma
 rich
 deepagents
 beautifulsoup4
+pytest-asyncio

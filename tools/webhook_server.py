@@ -224,6 +224,9 @@ def create_webhook_app(db_path: Optional[Path] = None) -> Flask:
     store = MessageStore(db_path)
     verify_token = os.getenv("WHATSAPP_WEBHOOK_VERIFY_TOKEN", "")
     app_secret = os.getenv("WHATSAPP_APP_SECRET", "")
+    from tools.payment_webhook import PaymentWebhookTool
+
+    mp_tool = PaymentWebhookTool(db_path=str(db_path))
 
     @app.route("/webhook", methods=["GET"])
     def verify():
@@ -274,25 +277,30 @@ def create_webhook_app(db_path: Optional[Path] = None) -> Flask:
     @app.route("/webhooks/mercadopago", methods=["POST"])
     def mp_webhook():
         """Receive and process MercadoPago subscription events."""
-        from tools.payment_webhook import PaymentWebhookTool
-
         payload = request.get_json(silent=True) or {}
         data_id = (payload.get("data") or {}).get("id", "")
 
-        # Validate HMAC signature when secret is configured
+        mp_secret = mp_tool.creds.get_mercadopago_config().get("webhook_secret", "")
         x_sig = request.headers.get("x-signature", "")
         x_req_id = request.headers.get("x-request-id", "")
-        if x_sig:
+        if mp_secret:
+            if not x_sig or not x_req_id:
+                logger.warning("Missing MercadoPago webhook signature headers")
+                return "Unauthorized", 401
+
             parts = dict(item.split("=", 1) for item in x_sig.split(",") if "=" in item)
             ts = parts.get("ts", "")
             v1 = parts.get("v1", "")
-            tool = PaymentWebhookTool()
-            if not tool.validate_signature(data_id, x_req_id, ts, v1):
+            if not ts or not v1:
+                logger.warning("Malformed MercadoPago webhook signature header")
+                return "Unauthorized", 401
+
+            if not mp_tool.validate_signature(data_id, x_req_id, ts, v1):
                 logger.warning("Invalid MercadoPago webhook signature")
                 return "Unauthorized", 401
 
         try:
-            result = PaymentWebhookTool().process_webhook(payload)
+            result = mp_tool.process_webhook(payload, allow_payload_fallbacks=False)
             logger.info(f"MP webhook processed: {result}")
             return "", 200
         except Exception as e:
