@@ -11,10 +11,9 @@ This module provides a complete Deep Agents implementation with:
 
 from __future__ import annotations
 
-import os
 import uuid
 from pathlib import Path
-from typing import Any, AsyncIterator, Generator, Optional
+from typing import Any, Generator, Optional
 
 from langchain_agent.agent import MCPJoseLangChainAgent
 

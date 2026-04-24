@@ -9,19 +9,15 @@ Notes:
 from __future__ import annotations
 
 import mimetypes
-import os
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
 from mcp.server.fastmcp import FastMCP
 from PIL import Image, ImageOps
 from requests import HTTPError
-from zoneinfo import ZoneInfo
 
-from core.config import get_config
 from core.http_client import HTTPClient
 from core.rate_limit import DailyRateLimiter
 

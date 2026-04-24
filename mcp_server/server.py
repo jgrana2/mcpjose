@@ -91,9 +91,6 @@ if __name__ == "__main__":
 # Import and attach our new subscription-aware logic
 try:
     from mcp_server.server_patch import add_guard_to_tools
-    from core.http_client import HTTPClient
-    from tools.payment_gateway import PaymentGatewayTool
-    from tools.payment_webhook import PaymentWebhookTool
 
     # In a full integration, these tools would be added to the ProjectToolRegistry
     # For now, we manually register them on the MCP object

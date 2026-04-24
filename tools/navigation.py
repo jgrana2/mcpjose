@@ -2,7 +2,7 @@
 
 import io
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from bs4 import BeautifulSoup
 from mcp.server.fastmcp import FastMCP

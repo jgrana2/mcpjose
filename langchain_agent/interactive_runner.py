@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Optional, TextIO
+from typing import TYPE_CHECKING, Any, Callable, Optional, TextIO
 from uuid import uuid4
 
 try:
@@ -20,6 +20,9 @@ except Exception:  # pragma: no cover - dependency guard
     HumanMessage = None
 
 from . import terminal_output
+
+if TYPE_CHECKING:
+    from .agent import MCPJoseLangChainAgent
 
 
 TERMINAL_EXIT_COMMANDS = {"exit", "quit", ":q"}

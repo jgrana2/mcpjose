@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, Optional
 
 import requests
 from mcp.server.fastmcp import FastMCP
 
-from core.config import get_config
 from core.http_client import HTTPClient
 
 

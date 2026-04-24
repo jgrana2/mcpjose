@@ -13,10 +13,10 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Dict
 
 if TYPE_CHECKING:
-    import argparse
+    pass
 
 
 def _print_team_result(result: Dict[str, Any], request: str) -> None:

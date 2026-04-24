@@ -168,11 +168,9 @@ class MCPJoseLangChainAgent:
             Dictionary with execution results.
         """
         from core.agent_team import AgentTeamCoordinator
-        from core.agent_team.adapter import AgentType
         from tools.agent_spawner import (
             spawn_agent_team,
             wait_for_team,
-            get_team_status,
         )
 
         team_id = team_id or f"team_{int(datetime.now().timestamp())}"

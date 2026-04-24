@@ -1,6 +1,5 @@
 import os
 import logging
-from typing import Dict, Any
 
 from mcp.server.fastmcp import FastMCP
 from core.guard import SubscriptionGuard

@@ -178,7 +178,6 @@ def test_record_voice_prompt_disconnects_subprocess_stdin(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     output = StringIO()
-    audio_path = tmp_path / "recorded.wav"
     captured: dict[str, object] = {}
 
     class FakeProcess:

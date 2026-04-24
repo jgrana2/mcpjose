@@ -5,10 +5,12 @@ These tools allow the LangChain agent to spawn and manage agent teams.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+if TYPE_CHECKING:
+    from core.agent_team import Task
 
 from core.agent_team import AgentTeamCoordinator, AgentType
 from tools.agent_spawner.claude_code_adapter import ClaudeCodeAdapter
@@ -415,6 +417,3 @@ def _determine_agent_type(task: Task) -> AgentType:
     # Default to LangChain subagent for safety
     return AgentType.LANGCHAIN_SUBAGENT
 
-
-# Import for type hints
-from core.agent_team.state import Task

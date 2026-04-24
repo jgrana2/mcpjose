@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Optional, TextIO
+from typing import Callable, Optional, TextIO
 
 from langchain_agent import interactive_runner as react_interactive_runner
 

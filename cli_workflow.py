@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    import argparse
+    pass
 
 
 def add_workflow_parser(subparsers: Any) -> None:

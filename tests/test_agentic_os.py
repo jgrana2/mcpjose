@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
-import threading
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -381,7 +380,7 @@ class TestEndToEnd:
 
     def test_simple_team_workflow(self, temp_work_dir, sample_plan_dir):
         """Test a simple team execution from plan to completion."""
-        from tools.agent_spawner import spawn_agent_team, get_team_status
+        from tools.agent_spawner import spawn_agent_team
 
         # Mock coordinator behavior for speed
         with patch("tools.agent_spawner.tools.AgentTeamCoordinator") as mock_coord_cls:

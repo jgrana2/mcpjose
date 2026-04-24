@@ -8,8 +8,7 @@ intermediate thinking steps.
 from __future__ import annotations
 
 import json
-import sys
-from typing import Any, Generator, Optional
+from typing import Any, Optional
 
 from . import terminal_output
 from .agent import MCPJoseLangChainDeepAgent
@@ -263,7 +262,6 @@ class InteractiveStreamingSession:
         )
 
         # Update history for next turn
-        from langchain_core.messages import HumanMessage, AIMessage
 
         self.chat_history.append({"role": "user", "content": user_input})
         if result.get("output"):
