@@ -5,7 +5,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from langchain_agent.agent import MCPJoseLangChainAgent
 from langchain_agent.context import ProjectContextLoader
+from langchain_agent.tool_registry import ProjectToolRegistry
 
 
 def _write(path: Path, content: str) -> None:
@@ -61,3 +63,21 @@ def test_context_loader_handles_duplicate_skill_names(tmp_path: Path) -> None:
     assert len(skills) == 2
     assert "shared" in skills
     assert "skills:shared" in skills
+
+
+def test_system_prompt_instructs_automatic_tool_use() -> None:
+    prompt = MCPJoseLangChainAgent._build_system_prompt("CTX")
+
+    assert "Do not tell the user you lack access if a safe tool can retrieve the answer." in prompt
+    assert "Current time, date, timezone, shell environment, or repo state" in prompt
+    assert "list_skills first, then read_skill" in prompt
+
+
+def test_tool_registry_describes_bash_for_environment_queries(tmp_path: Path) -> None:
+    registry = ProjectToolRegistry(repo_root=tmp_path)
+
+    specs = {name: description for name, description, _func in registry.tool_specs()}
+
+    assert "bash_execute" in specs
+    assert "current time/date" in specs["bash_execute"]
+    assert "read-only environment and repository inspection" in specs["bash_execute"]

@@ -1305,7 +1305,8 @@ class ProjectToolRegistry:
             ),
             (
                 "bash_execute",
-                "Run a bash command and capture stdout, stderr, and return code.",
+                "Run a bash command and capture stdout, stderr, and return code. "
+                "Use this for read-only environment and repository inspection such as current time/date, pwd, ls, git status, python version, and other factual shell queries.",
                 self.bash_execute,
             ),
             ("read_agents_md", "Read AGENTS.md instructions.", self.read_agents_md),

@@ -18,6 +18,8 @@ from typing import Any, AsyncIterator, Generator, Optional
 
 from langchain_agent.agent import MCPJoseLangChainAgent
 
+from .deepagents_config import MemoryManager, SkillsManager
+
 try:
     from deepagents import create_deep_agent
     from deepagents.state import AgentState
@@ -75,6 +77,11 @@ class MCPJoseLangChainDeepAgent(MCPJoseLangChainAgent):
         self.enable_streaming = enable_streaming
         self.thread_id = thread_id or str(uuid.uuid4())
         self.interrupt_on_tools = interrupt_on_tools or {}
+        self._memory_manager = MemoryManager(storage_path=self.repo_root / ".agent_memory")
+        self._skills_manager = SkillsManager(self.repo_root)
+        self._virtual_files: dict[str, Any] = {}
+        self._memory_paths: list[str] = []
+        self._skill_paths: list[str] = []
 
         # Initialize Deep Agents components
         self._checkpointer = None
@@ -91,6 +98,8 @@ class MCPJoseLangChainDeepAgent(MCPJoseLangChainAgent):
             if MemorySaver is not None:
                 self._checkpointer = MemorySaver()
 
+        self._prepare_virtual_context()
+
         # Build enhanced system prompt with context
         enhanced_prompt = self._build_enhanced_system_prompt()
 
@@ -101,6 +110,12 @@ class MCPJoseLangChainDeepAgent(MCPJoseLangChainAgent):
                 "system_prompt": enhanced_prompt,
                 "model": self.model,
             }
+
+            if self._memory_paths:
+                agent_kwargs["memory"] = self._memory_paths
+
+            if self._skill_paths:
+                agent_kwargs["skills"] = self._skill_paths
 
             # Add optional parameters
             if self._checkpointer is not None:
@@ -116,12 +131,44 @@ class MCPJoseLangChainDeepAgent(MCPJoseLangChainAgent):
                 print(f"Failed to create Deep Agent: {exc}")
             self._deep_agent = None
 
+    def _prepare_virtual_context(self) -> None:
+        """Seed Deep Agents virtual files for memory and skills."""
+        agents_md_content = self.context_loader.load_agents_guidance()
+        memory_md_content = self.context_loader.load_memory_guidance()
+
+        memory_files = self._memory_manager.prepare_memory_files(
+            agents_md_content=agents_md_content,
+            memory_md_content=memory_md_content,
+        )
+        skill_files = self._skills_manager.prepare_skill_files()
+
+        self._virtual_files = {
+            **memory_files,
+            **skill_files,
+        }
+        self._memory_paths = [
+            path for path in ("/AGENTS.md", "/MEMORY.md") if path in memory_files
+        ]
+        self._skill_paths = ["/skills/"] if skill_files else []
+
+    def _build_deep_agent_payload(self, messages: list[Any]) -> dict[str, Any]:
+        """Build a Deep Agents payload with virtual context files when available."""
+        payload: dict[str, Any] = {"messages": messages}
+        if self._virtual_files:
+            payload["files"] = dict(self._virtual_files)
+        return payload
+
     def _build_enhanced_system_prompt(self) -> str:
         """Build comprehensive system prompt with Deep Agents guidance."""
         sections = [
             self.system_prompt,
             "",
             "## Deep Agent Capabilities",
+            "",
+            "Use tools proactively when they can answer a request more accurately than model knowledge.",
+            "Do not say you lack access if a safe, read-only tool can retrieve the answer.",
+            "For current time, date, timezone, shell environment, repository facts, or local inspection, use tools immediately.",
+            "If the task might require project-specific workflows, inspect skills with list_skills and read_skill.",
             "",
             "You have access to the following built-in capabilities:",
             "- **write_todos**: Break down complex tasks into discrete steps and track progress",
@@ -181,7 +228,7 @@ class MCPJoseLangChainDeepAgent(MCPJoseLangChainAgent):
 
         try:
             result = self._deep_agent.invoke(
-                {"messages": messages},
+                self._build_deep_agent_payload(messages),
                 config=invoke_config if invoke_config else None,
             )
             output = self._extract_output_text(result)
@@ -252,7 +299,7 @@ class MCPJoseLangChainDeepAgent(MCPJoseLangChainAgent):
         try:
             # Stream events from the agent
             for event in self._deep_agent.stream(
-                {"messages": messages},
+                self._build_deep_agent_payload(messages),
                 config=stream_config if stream_config else None,
             ):
                 # Yield each event for real-time processing

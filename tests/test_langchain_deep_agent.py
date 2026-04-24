@@ -5,12 +5,16 @@ from __future__ import annotations
 import sys
 from io import StringIO
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from langchain_agent.agent import MCPJoseLangChainAgent
+from langchain_agent.context import ProjectContextLoader
 from langchain_deep_agent import interactive_runner
+from langchain_deep_agent.agent import MCPJoseLangChainDeepAgent
 from langchain_deep_agent import main as deep_main
 from langchain_deep_agent import terminal_output
 
@@ -140,3 +144,102 @@ def test_main_rejects_prompt_with_interactive(monkeypatch: pytest.MonkeyPatch) -
         deep_main.main()
 
     assert exc_info.value.code == 2
+
+
+def test_deep_agent_registers_memory_and_skills(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    (tmp_path / "AGENTS.md").write_text("# Rules\nUse tools first.", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Memory\nRemember decisions.", encoding="utf-8")
+    skill_dir = tmp_path / ".agents" / "skills" / "clock"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Clock\nHandle time questions.", encoding="utf-8")
+
+    captured: dict[str, Any] = {}
+
+    class FakeMemorySaver:
+        pass
+
+    class FakeDeepRuntime:
+        def invoke(self, payload: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
+            return {"messages": [{"role": "assistant", "content": "ok"}], "payload": payload, "config": config}
+
+        def stream(self, payload: dict[str, Any], config: dict[str, Any] | None = None):
+            yield {"payload": payload, "config": config}
+
+    def fake_base_init(
+        self: MCPJoseLangChainDeepAgent,
+        repo_root: Path | None = None,
+        model: str = "gpt-5.4-mini",
+        temperature: float = 0.0,
+        max_iterations: int = 12,
+        verbose: bool = False,
+    ) -> None:
+        self.repo_root = (repo_root or tmp_path).resolve()
+        self.model = model
+        self.context_loader = ProjectContextLoader(self.repo_root)
+        self.tools = ["demo-tool"]
+        self.system_prompt = "base prompt"
+        self.verbose = verbose
+
+    def fake_create_deep_agent(**kwargs: Any) -> FakeDeepRuntime:
+        captured.update(kwargs)
+        return FakeDeepRuntime()
+
+    monkeypatch.setattr(MCPJoseLangChainAgent, "__init__", fake_base_init)
+    monkeypatch.setattr("langchain_deep_agent.agent.MemorySaver", FakeMemorySaver)
+    monkeypatch.setattr("langchain_deep_agent.agent.create_deep_agent", fake_create_deep_agent)
+
+    agent = MCPJoseLangChainDeepAgent(repo_root=tmp_path)
+
+    assert captured["memory"] == ["/AGENTS.md", "/MEMORY.md"]
+    assert captured["skills"] == ["/skills/"]
+    assert isinstance(captured["checkpointer"], FakeMemorySaver)
+    assert "/AGENTS.md" in agent._virtual_files
+    assert "/MEMORY.md" in agent._virtual_files
+    assert "/skills/clock/SKILL.md" in agent._virtual_files
+
+
+def test_deep_agent_payload_includes_virtual_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "AGENTS.md").write_text("# Rules\nUse tools first.", encoding="utf-8")
+    skill_dir = tmp_path / ".agents" / "skills" / "clock"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Clock\nHandle time questions.", encoding="utf-8")
+
+    invoke_calls: list[dict[str, Any]] = []
+
+    class FakeDeepRuntime:
+        def invoke(self, payload: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
+            invoke_calls.append({"payload": payload, "config": config})
+            return {"messages": [{"role": "assistant", "content": "tool-backed response"}]}
+
+        def stream(self, payload: dict[str, Any], config: dict[str, Any] | None = None):
+            yield {"payload": payload, "config": config}
+
+    def fake_base_init(
+        self: MCPJoseLangChainDeepAgent,
+        repo_root: Path | None = None,
+        model: str = "gpt-5.4-mini",
+        temperature: float = 0.0,
+        max_iterations: int = 12,
+        verbose: bool = False,
+    ) -> None:
+        self.repo_root = (repo_root or tmp_path).resolve()
+        self.model = model
+        self.context_loader = ProjectContextLoader(self.repo_root)
+        self.tools = ["demo-tool"]
+        self.system_prompt = "base prompt"
+        self.verbose = verbose
+
+    monkeypatch.setattr(MCPJoseLangChainAgent, "__init__", fake_base_init)
+    monkeypatch.setattr("langchain_deep_agent.agent.MemorySaver", lambda: object())
+    monkeypatch.setattr("langchain_deep_agent.agent.create_deep_agent", lambda **kwargs: FakeDeepRuntime())
+
+    agent = MCPJoseLangChainDeepAgent(repo_root=tmp_path)
+    result = agent.invoke("what time is it?")
+
+    assert result["output"] == "tool-backed response"
+    assert invoke_calls
+    assert invoke_calls[0]["payload"]["messages"] == [{"role": "user", "content": "what time is it?"}]
+    assert "/AGENTS.md" in invoke_calls[0]["payload"]["files"]
+    assert "/skills/clock/SKILL.md" in invoke_calls[0]["payload"]["files"]
